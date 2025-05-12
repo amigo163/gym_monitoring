@@ -1,14 +1,80 @@
-# gymviz/app/components/sidebar.py
+# gym_monitoring/app/components/sidebar.py
 # Sidebar component for the GymViz dashboard
 
 import streamlit as st
 import pandas as pd
 import datetime as dt
 import os
+import sys
 
-from data.parser import parse_strong_csv
-from data.processor import preprocess_data
-from utils.date_utils import get_default_date_range
+# Add project root to Python path if it's not already added in main.py
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
+# For now, let's create a minimal date_utils module inline to avoid import issues
+def get_default_date_range(min_date, max_date):
+    """
+    Get a default date range for filtering
+    
+    Parameters:
+    -----------
+    min_date : datetime.date
+        Minimum date in the dataset
+    max_date : datetime.date
+        Maximum date in the dataset
+        
+    Returns:
+    --------
+    tuple
+        (start_date, end_date) with default values
+    """
+    # Default to last 6 months if enough data is available
+    six_months_ago = max_date - dt.timedelta(days=180)
+    default_start = six_months_ago if six_months_ago > min_date else min_date
+    
+    return default_start, max_date
+
+def parse_strong_csv(file_path):
+    """
+    Simple CSV parser for now - will be replaced by proper import later
+    """
+    return pd.read_csv(file_path, sep=';')
+
+def preprocess_data(df):
+    """
+    Simple preprocessing for now - will be replaced by proper import later
+    """
+    # Convert date column to datetime
+    df['Date'] = pd.to_datetime(df['Date'])
+    
+    # Calculate volume (weight × reps)
+    df['Volume'] = df['Weight (kg)'] * df['Reps']
+    
+    # Add an ID column
+    df['_id'] = range(1, len(df) + 1)
+    
+    # Add a dummy muscle group column based on exercise name
+    # This is just for testing and will be replaced by proper mapping
+    muscle_groups = {
+        'Bench Press': 'Chest',
+        'Squat': 'Legs',
+        'Deadlift': 'Back',
+        'Pull Up': 'Back',
+        'Shoulder Press': 'Shoulders',
+        'Bicep Curl': 'Arms',
+        'Tricep Extension': 'Arms',
+        'Leg Press': 'Legs',
+        'Lateral Raise': 'Shoulders',
+        'Leg Curl': 'Legs'
+    }
+    
+    df['Muscle Group'] = df['Exercise Name'].apply(
+        lambda x: next((v for k, v in muscle_groups.items() if k.lower() in x.lower()), 'Other')
+    )
+    
+    return df
 
 def render_sidebar():
     """
@@ -20,7 +86,6 @@ def render_sidebar():
         - DataFrame: Processed data or None if no data
         - dict: Filters applied (date range, etc.)
     """
-    st.sidebar.image("assets/images/logo.png", width=200)
     st.sidebar.title("GymViz")
     
     # File uploader
@@ -34,7 +99,7 @@ def render_sidebar():
     
     # Load data
     if uploaded_file is not None:
-        with st.sidebar.spinner("Processing data..."):
+        with st.spinner("Processing data..."):
             try:
                 # Parse and preprocess the uploaded file
                 raw_data = parse_strong_csv(uploaded_file)
@@ -43,9 +108,9 @@ def render_sidebar():
             except Exception as e:
                 st.sidebar.error(f"Error loading data: {str(e)}")
     elif use_test_data:
-        with st.sidebar.spinner("Loading sample data..."):
+        with st.spinner("Loading sample data..."):
             # Load sample data for demonstration
-            sample_data_path = "data/samples/strong_sample.csv"
+            sample_data_path = os.path.join(project_root, "data", "samples", "strong_sample.csv")
             if os.path.exists(sample_data_path):
                 raw_data = parse_strong_csv(sample_data_path)
                 data = preprocess_data(raw_data)

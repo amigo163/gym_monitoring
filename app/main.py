@@ -1,4 +1,4 @@
-# gymviz/app/main.py
+# gym_monitoring/app/main.py
 # Main entry point for the GymViz dashboard application
 
 import streamlit as st
@@ -6,10 +6,12 @@ import pandas as pd
 import os
 import sys
 
-# Add project root to path to allow absolute imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add project root to Python path to allow imports to work
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(current_dir))
+sys.path.append(project_root)
 
-# Import pages
+# Now imports will work properly
 from app.pages import (
     overview,
     exercise_analysis,
@@ -22,12 +24,11 @@ from app.pages import (
 # Import components
 from app.components.sidebar import render_sidebar
 
-# Import data processing
-from data.parser import parse_strong_csv
-from data.processor import preprocess_data
-
 # Import config
-from config.settings import APP_TITLE, APP_ICON, APP_LAYOUT, VERSION
+APP_TITLE = "GymViz - Advanced Workout Analytics"
+APP_ICON = "💪"
+APP_LAYOUT = "wide"
+VERSION = "2.0.0"
 
 def main():
     """Main function that runs the Streamlit application"""
@@ -40,14 +41,43 @@ def main():
         initial_sidebar_state="expanded"
     )
     
-    # Load custom CSS
-    with open("assets/css/style.css") as f:
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    # Load custom CSS - we'll handle this better later
+    css = """
+    <style>
+    .record-box {
+        background-color: #f8f9fa;
+        border-left: 4px solid #4CC9F0;
+        padding: 15px;
+        margin-bottom: 10px;
+        border-radius: 0 0.5rem 0.5rem 0;
+    }
+    .record-date {
+        color: #6C757D;
+        font-size: 0.85rem;
+        margin-bottom: 0.25rem;
+    }
+    .record-value {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: #333333;
+    }
+    .sub-header {
+        font-size: 1.8rem;
+        color: #3A0CA3;
+        margin-top: 2rem;
+        margin-bottom: 1rem;
+        font-weight: 600;
+        border-bottom: 2px solid rgba(58, 12, 163, 0.2);
+        padding-bottom: 0.5rem;
+    }
+    </style>
+    """
+    st.markdown(css, unsafe_allow_html=True)
     
     # Render app header
-    st.markdown(f"<div class='header-container'><h1>{APP_TITLE}</h1><p>Version {VERSION}</p></div>", unsafe_allow_html=True)
+    st.markdown(f"<h1>{APP_TITLE}</h1><p>Version {VERSION}</p>", unsafe_allow_html=True)
     
-    # Render sidebar and get selected data
+    # Create sidebar
     data, filters = render_sidebar()
     
     if data is not None:
@@ -100,15 +130,6 @@ def main():
         6. Email the export to yourself
         7. Upload the CSV file using the sidebar
         """)
-        
-        # Show example visualizations
-        st.markdown("### Example Visualizations")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.image("assets/images/example_chart1.png", caption="Workout Volume by Muscle Group")
-        with col2:
-            st.image("assets/images/example_chart2.png", caption="Progress Tracking")
 
 if __name__ == "__main__":
     main()
