@@ -22,7 +22,7 @@ st.set_page_config(
 def load_data():
     """Load and preprocess the CSV data"""
     # Placeholder for file path - replace with actual path in production
-    file_path = "strong.csv"
+    file_path = "/Users/alejandroamigodotras/Mi unidad/strong_data/strong.csv"
     
     # Read CSV - assumed semicolon separated based on column name pattern
     df = pd.read_csv(file_path, sep=';', encoding='utf-8')
