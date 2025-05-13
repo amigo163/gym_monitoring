@@ -6,8 +6,47 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
+import logging
 
 from config.settings import THEME, MUSCLE_GROUP_COLORS, COLOR_SCALES, PLOT_LAYOUT
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+def ensure_period_columns(df, period='month'):
+    """
+    Ensure that period columns (YearMonth, YearWeek) exist in the DataFrame
+    
+    Parameters:
+    -----------
+    df : pandas DataFrame
+        DataFrame to check/modify
+    period : str
+        Aggregation period ('week', 'month', or 'year')
+        
+    Returns:
+    --------
+    pandas DataFrame
+        DataFrame with period columns
+    """
+    # Make a copy to avoid modifying the original
+    result_df = df.copy()
+    
+    # Create period columns if they don't exist
+    if 'YearMonth' not in result_df.columns:
+        result_df['YearMonth'] = result_df['Date'].dt.strftime('%Y-%m')
+    
+    if 'YearWeek' not in result_df.columns:
+        result_df['YearWeek'] = result_df['Date'].dt.strftime('%Y-%U')
+    
+    if 'Year' not in result_df.columns:
+        result_df['Year'] = result_df['Date'].dt.year
+    
+    return result_df
 
 def create_top_exercises_chart(df, metric='frequency', n=10, muscle_group=None):
     """
@@ -68,7 +107,6 @@ def create_top_exercises_chart(df, metric='frequency', n=10, muscle_group=None):
         
         # Update layout
         fig.update_layout(
-            **PLOT_LAYOUT,
             xaxis_title='Number of Sets',
             yaxis_title='',
             xaxis=dict(
@@ -78,7 +116,10 @@ def create_top_exercises_chart(df, metric='frequency', n=10, muscle_group=None):
             yaxis=dict(
                 tickfont=dict(size=12),
                 title_font=dict(size=14),
-            )
+            ),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='white')
         )
         
     elif metric == 'volume':
@@ -109,7 +150,6 @@ def create_top_exercises_chart(df, metric='frequency', n=10, muscle_group=None):
         
         # Update layout
         fig.update_layout(
-            **PLOT_LAYOUT,
             xaxis_title='Total Volume (kg×reps)',
             yaxis_title='',
             xaxis=dict(
@@ -119,7 +159,10 @@ def create_top_exercises_chart(df, metric='frequency', n=10, muscle_group=None):
             yaxis=dict(
                 tickfont=dict(size=12),
                 title_font=dict(size=14),
-            )
+            ),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='white')
         )
     
     elif metric == 'weight':
@@ -150,7 +193,6 @@ def create_top_exercises_chart(df, metric='frequency', n=10, muscle_group=None):
         
         # Update layout
         fig.update_layout(
-            **PLOT_LAYOUT,
             xaxis_title='Maximum Weight (kg)',
             yaxis_title='',
             xaxis=dict(
@@ -160,7 +202,10 @@ def create_top_exercises_chart(df, metric='frequency', n=10, muscle_group=None):
             yaxis=dict(
                 tickfont=dict(size=12),
                 title_font=dict(size=14),
-            )
+            ),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='white')
         )
     
     elif metric == 'intensity':
@@ -193,7 +238,6 @@ def create_top_exercises_chart(df, metric='frequency', n=10, muscle_group=None):
             
             # Update layout
             fig.update_layout(
-                **PLOT_LAYOUT,
                 xaxis_title='Average RPE',
                 yaxis_title='',
                 xaxis=dict(
@@ -203,7 +247,10 @@ def create_top_exercises_chart(df, metric='frequency', n=10, muscle_group=None):
                 yaxis=dict(
                     tickfont=dict(size=12),
                     title_font=dict(size=14),
-                )
+                ),
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='white')
             )
         else:
             return None
@@ -350,7 +397,6 @@ def create_exercise_progression_chart(df, exercise_name):
     
     # Update layout
     fig.update_layout(
-        **PLOT_LAYOUT,
         height=800,
         title=f'Progression for {exercise_name}',
         showlegend=True,
@@ -361,7 +407,10 @@ def create_exercise_progression_chart(df, exercise_name):
             y=1.02,
             xanchor="center",
             x=0.5
-        )
+        ),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='white')
     )
     
     # Update y-axes titles
@@ -392,6 +441,9 @@ def create_exercise_variety_chart(df, period='month'):
     plotly.graph_objects.Figure
         Exercise variety chart
     """
+    # Add period columns if they don't exist
+    df = ensure_period_columns(df, period)
+    
     # Define the period column
     if period == 'week':
         period_col = 'YearWeek'
@@ -454,7 +506,6 @@ def create_exercise_variety_chart(df, period='month'):
     
     # Update axes and layout
     fig.update_layout(
-        **PLOT_LAYOUT,
         title=f'Exercise Variety per {period.capitalize()}',
         hovermode='x unified',
         legend=dict(
@@ -463,7 +514,10 @@ def create_exercise_variety_chart(df, period='month'):
             y=1.02,
             xanchor="right",
             x=1
-        )
+        ),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='white')
     )
     
     fig.update_xaxes(title_text=period.capitalize())
@@ -582,7 +636,11 @@ def create_exercise_distribution_chart(df, by='muscle_group'):
     else:
         return None
     
-    # Update layout
-    fig.update_layout(**PLOT_LAYOUT)
+    # Update layout with dark mode settings
+    fig.update_layout(
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='white')
+    )
     
     return fig

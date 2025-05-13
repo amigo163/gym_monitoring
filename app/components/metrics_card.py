@@ -2,7 +2,32 @@
 # Reusable metric card component for the GymViz dashboard
 
 import streamlit as st
-from config.settings import THEME
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Try to import THEME from settings
+try:
+    from config.settings import THEME
+except ImportError:
+    logger.warning("Could not import THEME from settings, using default values")
+    # Default values if settings import fails
+    THEME = {
+        "primary": "#4361EE",
+        "secondary": "#3A0CA3",
+        "accent": "#4CC9F0",
+        "success": "#4CAF50",
+        "error": "#F72585",
+        "text": {
+            "primary": "#FFFFFF",
+            "secondary": "#B0B0B0"
+        }
+    }
 
 def metric_card(label, value, delta=None, suffix="", help_text=None, color=None, icon=None):
     """
@@ -63,7 +88,7 @@ def metric_card(label, value, delta=None, suffix="", help_text=None, color=None,
         
         # Add help tooltip if provided
         if help_text:
-            st.markdown(f"<div style='text-align:center;'><small>{help_text}</small></div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='text-align:center; color: {THEME['text']['secondary']}'><small>{help_text}</small></div>", unsafe_allow_html=True)
 
 def metric_row(metrics, columns=None):
     """
@@ -76,6 +101,10 @@ def metric_row(metrics, columns=None):
     columns : int, optional
         Number of columns (defaults to length of metrics list)
     """
+    if not metrics:
+        logger.warning("No metrics provided to metric_row")
+        return
+    
     if columns is None:
         columns = len(metrics)
     
@@ -140,8 +169,8 @@ def progress_metric(label, current_value, target_value, suffix="", help_text=Non
             <div class="metric-card slide-in">
                 <div class="metric-value">{current_formatted}{suffix} <span style="font-size: 0.7em; color: {THEME["text"]["secondary"]}">/ {target_formatted}{suffix}</span></div>
                 <div class="metric-label">{label}</div>
-                <div class="progress-container" style="margin-top: 10px; background-color: #eee; border-radius: 10px; height: 10px; width: 100%;">
-                    <div class="progress-bar" style="width: {progress_pct}%; height: 100%; border-radius: 10px; background-color: {color};"></div>
+                <div class="progress-container">
+                    <div class="progress-bar" style="width: {progress_pct}%;"></div>
                 </div>
                 <div style="display: flex; justify-content: space-between; font-size: 0.8em; color: {THEME["text"]["secondary"]}; margin-top: 5px;">
                     <div>0</div>
@@ -154,7 +183,7 @@ def progress_metric(label, current_value, target_value, suffix="", help_text=Non
         
         # Add help tooltip if provided
         if help_text:
-            st.markdown(f"<div style='text-align:center;'><small>{help_text}</small></div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='text-align:center; color: {THEME['text']['secondary']}'><small>{help_text}</small></div>", unsafe_allow_html=True)
 
 def comparison_metric(label, value1, value2, label1="Current", label2="Previous", suffix="", help_text=None):
     """
@@ -231,7 +260,47 @@ def comparison_metric(label, value1, value2, label1="Current", label2="Previous"
         
         # Add help tooltip if provided
         if help_text:
-            st.markdown(f"<div style='text-align:center;'><small>{help_text}</small></div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='text-align:center; color: {THEME['text']['secondary']}'><small>{help_text}</small></div>", unsafe_allow_html=True)
+
+def get_system_stats_cards():
+    """
+    Create a set of system statistic cards for the dashboard
+    
+    Returns:
+    --------
+    list
+        List of metric cards
+    """
+    return [
+        {
+            "label": "Uptime",
+            "value": "12.5",
+            "suffix": " hrs",
+            "icon": "⏱️",
+            "help_text": "System uptime since last restart"
+        },
+        {
+            "label": "CPU Usage",
+            "value": 24,
+            "suffix": "%",
+            "icon": "🔄",
+            "help_text": "Current CPU utilization"
+        },
+        {
+            "label": "Memory",
+            "value": 1.8,
+            "suffix": " GB",
+            "icon": "🧠",
+            "help_text": "Current memory usage"
+        },
+        {
+            "label": "Disk Space",
+            "value": 65,
+            "suffix": "%",
+            "icon": "💾",
+            "help_text": "Disk space utilization"
+        }
+    ]
 
 def _get_delta_class(delta):
     """Helper function to determine delta styling class"""

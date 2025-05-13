@@ -7,25 +7,25 @@ import plotly.express as px
 APP_TITLE = "GymViz - Advanced Workout Analytics"
 APP_ICON = "💪"
 APP_LAYOUT = "wide"
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 
 # Debug settings
 DEBUG = False
 
-# Theme settings
+# Theme settings - Dark Mode Optimized
 THEME = {
-    "primary": "#4361EE",      # Primary brand color
-    "secondary": "#3A0CA3",    # Secondary brand color
-    "accent": "#4CC9F0",       # Accent color
-    "success": "#4CAF50",      # Success/positive color
-    "warning": "#FFD166",      # Warning color
-    "error": "#EF476F",        # Error/negative color
-    "background": "#FFFFFF",   # Background color
-    "surface": "#F8F9FA",      # Surface/card color
+    "primary": "#4361EE",      # Primary brand color - blue
+    "secondary": "#3A0CA3",    # Secondary brand color - deep purple
+    "accent": "#4CC9F0",       # Accent color - cyan
+    "success": "#4CAF50",      # Success/positive color - green
+    "warning": "#FFD166",      # Warning color - amber
+    "error": "#F72585",        # Error/negative color - pink
+    "background": "#121212",   # Background color - dark gray
+    "surface": "#1E1E1E",      # Surface/card color - darker gray
     "text": {
-        "primary": "#333333",  # Primary text color
-        "secondary": "#6C757D", # Secondary text color
-        "light": "#FFFFFF",    # Light text color (for dark backgrounds)
+        "primary": "#FFFFFF",  # Primary text color - white
+        "secondary": "#B0B0B0", # Secondary text color - light gray
+        "light": "#FFFFFF",    # Light text color (for dark backgrounds) - white
     },
     "font": {
         "family": "Inter, sans-serif",
@@ -46,43 +46,44 @@ THEME = {
         "pill": "9999px",      # Pill shape
     },
     "shadow": {
-        "sm": "0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24)",
-        "md": "0 4px 6px rgba(0,0,0,0.1)",
-        "lg": "0 10px 20px rgba(0,0,0,0.1), 0 6px 6px rgba(0,0,0,0.1)",
+        "sm": "0 1px 3px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.6)",
+        "md": "0 4px 6px rgba(0,0,0,0.4)",
+        "lg": "0 10px 20px rgba(0,0,0,0.4), 0 6px 6px rgba(0,0,0,0.4)",
     }
 }
 
-# Muscle group color mapping
+# Muscle group color mapping - brightened for dark mode
 MUSCLE_GROUP_COLORS = {
     "Chest": "#FF5A5F",        # Coral red
-    "Back": "#087E8B",         # Teal
-    "Shoulders": "#F5B700",    # Amber
-    "Arms": "#FF9E00",         # Orange
-    "Legs": "#3A506B",         # Slate blue
-    "Core": "#5C946E",         # Forest green
-    "Olympic": "#6B2D5C",      # Deep purple
-    "Cardio": "#D81159",       # Crimson
-    "Compound": "#8A4FFF",     # Violet
-    "Other": "#7C7C7C"         # Gray
+    "Back": "#08B8CC",         # Bright teal
+    "Shoulders": "#FFCC33",    # Bright amber
+    "Arms": "#FFA726",         # Bright orange
+    "Legs": "#5C7ACA",         # Brighter slate blue
+    "Core": "#66BB6A",         # Brighter forest green
+    "Olympic": "#9C56CC",      # Brighter deep purple
+    "Cardio": "#F06292",       # Brighter crimson
+    "Compound": "#9C6EFF",     # Brighter violet
+    "Other": "#A0A0A0"         # Lighter gray
 }
 
-# Color scales for continuous variables
+# Color scales for continuous variables - dark mode optimized
 COLOR_SCALES = {
-    "volume": px.colors.sequential.Sunset,
-    "weight": px.colors.sequential.Plasma,
-    "reps": px.colors.sequential.Blues,
-    "intensity": px.colors.sequential.Inferno,
-    "frequency": px.colors.sequential.Viridis,
-    "progress": px.colors.sequential.Sunsetdark,
-    "heatmap": px.colors.sequential.YlGnBu,
-    "balance": px.colors.diverging.RdBu,
-    "timeline": px.colors.sequential.Magma
+    "volume": px.colors.sequential.Plasma,         # Yellow-purple
+    "weight": px.colors.sequential.Viridis,        # Blue-green-yellow
+    "reps": px.colors.sequential.Cividis,          # Yellow-blue
+    "intensity": px.colors.sequential.Turbo,       # Blue-green-yellow-red
+    "frequency": px.colors.sequential.Magma,       # Purple-orange
+    "progress": px.colors.sequential.Inferno,      # Purple-orange-yellow
+    "heatmap": px.colors.sequential.YlGnBu,        # Yellow-green-blue
+    "balance": px.colors.diverging.RdBu,           # Red-white-blue
+    "timeline": px.colors.sequential.Plasma        # Yellow-purple
 }
 
-# Plot layout settings
+# Plot layout settings - dark mode
 PLOT_LAYOUT = {
     "font_family": THEME["font"]["family"],
     "font_size": 12,
+    "font_color": THEME["text"]["primary"],
     "title_font_size": 18,
     "title_font_color": THEME["text"]["primary"],
     "legend_title_font_size": 12,
@@ -91,9 +92,17 @@ PLOT_LAYOUT = {
     "coloraxis_colorbar_tickfont_size": 10,
     "margin": {"l": 50, "r": 30, "t": 50, "b": 50},
     "autosize": True,
-    "template": "plotly_white",
-    "paper_bgcolor": THEME["background"],
-    "plot_bgcolor": THEME["surface"],
+    "template": "plotly_dark",  # Use dark template
+    "paper_bgcolor": "rgba(0,0,0,0)",  # Transparent background
+    "plot_bgcolor": "rgba(30,30,30,0.3)",  # Slightly visible dark background
+    "xaxis": {
+        "gridcolor": "rgba(80,80,80,0.2)",
+        "zerolinecolor": "rgba(80,80,80,0.5)"
+    },
+    "yaxis": {
+        "gridcolor": "rgba(80,80,80,0.2)",
+        "zerolinecolor": "rgba(80,80,80,0.5)"
+    }
 }
 
 # Chart dimensions
@@ -120,3 +129,7 @@ CSV_SETTINGS = {
 # Cache settings
 CACHE_ENABLED = True
 CACHE_TTL = 3600  # Cache time-to-live in seconds (1 hour)
+
+# Default directories
+DEFAULT_DATA_PATH = "data/samples/"
+USER_DATA_PATH = "data/user/"

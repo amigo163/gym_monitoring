@@ -1,128 +1,236 @@
-# GymViz: Advanced Gym Metrics Dashboard
+# GymViz - Advanced Workout Analytics
 
-GymViz is a comprehensive analytics dashboard for gym performance data, specifically designed to work with CSV exports from the Strong workout tracking app. This dashboard visualizes your workout data to provide actionable insights into your training patterns, progress, and balance.
+GymViz is a Streamlit-based dashboard application that provides advanced analytics and visualization for workout data from the Strong app. The application allows users to upload their Strong app export (CSV format) and gain insights into their workout patterns, exercise progression, and muscle group balance.
 
 ## Features
 
-- **Workout Consistency Analysis**: Track your workout frequency, streaks, and training patterns
-- **Muscle Group Balance**: Analyze how your training volume is distributed across muscle groups
-- **Exercise Performance**: Monitor progress for individual exercises with detailed progression charts
-- **Progress Tracking**: Track personal records and strength gains over time
-- **Body Balance Analysis**: Assess push/pull and upper/lower body balance with recommendations
-- **Workout Calendar**: Visualize your training frequency with an interactive heatmap
-- **Comprehensive Metrics**: Analyze volume, intensity, density, and variety in your workouts
+- **Dashboard Overview**: Quick view of key metrics and workout patterns
+- **Exercise Analysis**: Detailed analysis of exercise progression and performance
+- **Muscle Groups**: Analysis of muscle group balance and development
+- **Workout Patterns**: Insights into workout frequency, duration, and consistency
+- **Progress Tracking**: Track PRs (Personal Records) and strength progression
+- **Records Registry**: Repository of all your personal records
 
-## File Structure
+## Project Structure
 
-- `gym_dashboard_main.py`: Main Streamlit dashboard application
-- `muscle_group_utils.py`: Utilities for muscle group analysis and performance calculations
-- `visualization_utils.py`: Functions for creating interactive visualizations
-- `parse_strong_csv.py`: Utility for parsing and examining Strong CSV files
+The project follows a modular structure with clear separation of concerns:
 
-## Requirements
-
-- Python 3.7+
-- Streamlit
-- Pandas
-- NumPy
-- Plotly
-- Matplotlib 
-- Seaborn
+```
+gymviz/
+│
+├── app/                       # Application code
+│   ├── __init__.py            # Package initialization
+│   ├── main.py                # Entry point
+│   ├── components/            # Reusable UI components
+│   │   ├── __init__.py
+│   │   ├── sidebar.py         # Sidebar component
+│   │   ├── metrics_card.py    # Metrics display component
+│   │   └── filters.py         # Data filtering components
+│   │
+│   └── pages/                 # Dashboard pages
+│       ├── __init__.py
+│       ├── overview.py        # Overview dashboard
+│       ├── exercise_analysis.py
+│       ├── muscle_groups.py
+│       ├── workout_patterns.py
+│       ├── progress_tracking.py
+│       └── records_registry.py
+│
+├── data/                      # Data handling
+│   ├── __init__.py
+│   ├── parser.py              # CSV parsing functions
+│   ├── processor.py           # Data processing and transformations
+│   ├── cache.py               # Caching functionality
+│   └── samples/               # Sample data files
+│       └── strong_sample.csv
+│
+├── analysis/                  # Data analysis
+│   ├── __init__.py
+│   ├── exercise.py            # Exercise analysis functions
+│   ├── workout.py             # Workout analysis functions
+│   └── progress.py            # Progress tracking analysis
+│
+├── visualization/             # Visualization code
+│   ├── __init__.py
+│   ├── themes.py              # Theme management
+│   ├── charts/                # Chart creation
+│   │   ├── __init__.py
+│   │   ├── exercise_charts.py
+│   │   ├── workout_charts.py
+│   │   └── progress_charts.py
+│   │
+│   └── assets/                # Static assets
+│       ├── css/
+│       │   └── style.css
+│       └── js/
+│           └── utils.js
+│
+├── utils/                     # Utility functions
+│   ├── __init__.py
+│   ├── date_utils.py          # Date manipulation utilities
+│   └── export.py              # Export functionality
+│
+├── config/                    # Configuration
+│   ├── __init__.py
+│   ├── settings.py            # Application settings
+│   └── mappings.py            # Exercise-to-muscle mappings
+│
+└── tests/                     # Tests
+    ├── __init__.py
+    ├── test_parser.py
+    ├── test_processor.py
+    └── test_analysis.py
+```
 
 ## Installation
 
 1. Clone the repository:
-```
-git clone <repository-url>
-cd gymviz
-```
+   ```bash
+   git clone https://github.com/your_username/gymviz.git
+   cd gymviz
+   ```
 
-2. Create and activate a virtual environment:
-```
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
+2. Create a virtual environment and activate it:
+   ```bash
+   python -m venv venv
+   # On Windows
+   venv\Scripts\activate
+   # On macOS/Linux
+   source venv/bin/activate
+   ```
 
-3. Install dependencies:
-```
-pip install -r requirements.txt
-```
+3. Install the dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 ## Usage
 
-1. Export your workout data from the Strong app as a CSV file
+1. Run the Streamlit app:
+   ```bash
+   streamlit run app/main.py
+   ```
 
-2. Run the dashboard:
-```
-streamlit run gym_dashboard_main.py
-```
+2. Open your browser and navigate to `http://localhost:8501`
 
-3. Upload your CSV file through the Streamlit interface
+3. Upload your Strong app export CSV file using the sidebar, or use the default `strong.csv` if available in the root directory.
 
-4. Explore your workout analytics!
+## Data Format
 
-## Data Requirements
-
-The dashboard expects a CSV export from the Strong app with the following columns:
-- `Workout #`
-- `Date`
-- `Workout Name`
-- `Duration (sec)` (optional)
-- `Exercise Name`
-- `Set Order`
-- `Weight (kg)`
-- `Reps`
-- `RPE` (optional)
-- `Distance (meters)` (optional)
-- `Seconds` (optional)
-- `Notes` (optional)
-- `Workout Notes` (optional)
-
-## How to Export Data from Strong
-
-1. Open the Strong app
-2. Go to the History tab
-3. Tap the settings icon (⚙️)
-4. Select "Export Data"
-5. Choose CSV format
-6. Email the export to yourself or save it directly
-7. Upload the CSV file to the dashboard
-
-## Available Metrics
-
-### Consistency Metrics
-- Workout frequency patterns
-- Longest training streak
-- Rest day patterns
-- Day-of-week preferences
-
-### Performance Metrics
-- Volume progression per exercise/muscle group
-- Personal record (PR) frequency
-- Progressive overload tracking
-- Exercise variety over time
-
-### Body Balance Metrics
-- Push/Pull ratio
-- Upper/Lower body ratio
-- Volume distribution by muscle group
-- Muscle group balance recommendations
+GymViz expects a CSV export from the Strong app with the following columns:
+- Workout #
+- Date
+- Workout Name
+- Duration (sec)
+- Exercise Name
+- Set Order
+- Weight (kg)
+- Reps
+- RPE (optional)
+- Distance (meters) (optional)
+- Seconds (optional)
+- Notes (optional)
+- Workout Notes (optional)
 
 ## Customization
 
-You can customize several aspects of the dashboard:
-- Date range selection for analysis
-- Exercise selection for detailed progression analysis
-- Aggregation period (weekly, monthly, yearly) for trend charts
+You can customize the app's appearance and behavior by modifying the settings in `config/settings.py`.
 
-## Future Enhancements
+### Dark Mode Support
 
-- Goal tracking and projection
-- Body measurement integration
-- Machine learning for performance predictions
-- Workout recommendation engine
-- Data export for advanced analysis
+GymViz is optimized for dark mode, with a sleek, modern interface that reduces eye strain during late-night analysis sessions.
+
+## Recent Improvements
+
+1. **Default CSV Detection**: The app now detects and offers to use a `strong.csv` file from the root directory without requiring upload.
+
+2. **Fixed YearMonth Error**: Resolved the KeyError issues with YearMonth and YearWeek by ensuring these columns are created during data preprocessing.
+
+3. **Dark Mode Optimization**: Updated all charts and UI components to support dark mode with improved readability and reduced eye strain.
+
+4. **Improved Error Handling**: Added comprehensive error handling throughout the application to provide useful feedback when issues occur.
+
+5. **Performance Enhancements**: Optimized data processing and visualization for faster loading and smoother interactions.
+
+6. **Date Range Defaults**: Added support for starting the date range from 2023, making it easier to analyze longer periods.
+
+7. **Responsive Design**: Improved mobile responsiveness for better use on tablets and phones.
+
+8. **Modular Architecture**: Completely restructured the codebase to follow a modular design with separation of concerns.
+
+9. **Graceful Fallbacks**: Added fallback functionality when certain features or data columns are not available.
+
+10. **Enhanced Visuals**: Improved chart aesthetics with consistent styling and better color palettes.
+
+## Dependencies
+
+- Python 3.9+
+- Streamlit
+- Pandas
+- NumPy
+- Plotly
+- Matplotlib (optional)
+- Seaborn (optional)
+
+## Requirements
+
+```
+streamlit>=1.22.0
+pandas>=1.5.0
+numpy>=1.23.0
+plotly>=5.13.0
+matplotlib>=3.6.0
+seaborn>=0.12.0
+```
+
+## Data Privacy
+
+GymViz processes all data locally on your machine. No workout data is sent to any external servers.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## License
 
-[MIT License](LICENSE)
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgements
+
+- [Strong App](https://www.strong.app/) for the workout tracking application
+- [Streamlit](https://streamlit.io/) for the amazing web application framework
+- [Plotly](https://plotly.com/) for the interactive visualization library
+- All the fitness enthusiasts who provided feedback and feature suggestions
+
+## Screenshots
+
+### Dashboard Overview
+![Dashboard Overview](docs/images/dashboard_overview.png)
+
+### Exercise Analysis
+![Exercise Analysis](docs/images/exercise_analysis.png)
+
+### Muscle Groups
+![Muscle Groups](docs/images/muscle_groups.png)
+
+### Progress Tracking
+![Progress Tracking](docs/images/progress_tracking.png)
+
+## Future Development
+
+- Export functionality for reports and charts
+- Customizable muscle group mappings through the UI
+- Integration with other fitness apps and devices
+- Machine learning for workout recommendations
+- User accounts and cloud storage (optional)
+- Mobile app version
+
+## Need Help?
+
+If you encounter any issues or need help using GymViz, please open an issue on GitHub or contact us at support@gymviz.app.

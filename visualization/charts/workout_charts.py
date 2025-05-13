@@ -7,8 +7,45 @@ from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
 import datetime as dt
+import logging
 
-from config.settings import THEME, MUSCLE_GROUP_COLORS, COLOR_SCALES, PLOT_LAYOUT
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+def ensure_period_columns(df, period='month'):
+    """
+    Ensure that period columns (YearMonth, YearWeek) exist in the DataFrame
+    
+    Parameters:
+    -----------
+    df : pandas DataFrame
+        DataFrame to check/modify
+    period : str
+        Aggregation period ('week', 'month', or 'year')
+        
+    Returns:
+    --------
+    pandas DataFrame
+        DataFrame with period columns
+    """
+    # Make a copy to avoid modifying the original
+    result_df = df.copy()
+    
+    # Create period columns if they don't exist
+    if 'YearMonth' not in result_df.columns:
+        result_df['YearMonth'] = result_df['Date'].dt.strftime('%Y-%m')
+    
+    if 'YearWeek' not in result_df.columns:
+        result_df['YearWeek'] = result_df['Date'].dt.strftime('%Y-%U')
+    
+    if 'Year' not in result_df.columns:
+        result_df['Year'] = result_df['Date'].dt.year
+    
+    return result_df
 
 def create_workouts_heatmap(df, year=None):
     """
@@ -94,7 +131,7 @@ def create_workouts_heatmap(df, year=None):
             z=month_pivot.values,
             x=month_pivot.columns,
             y=['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-            colorscale=COLOR_SCALES['heatmap'],
+            colorscale='YlGnBu',
             showscale=i == 0,  # Only show color scale for the first month
             colorbar=dict(title='Workouts')
         )
@@ -103,10 +140,12 @@ def create_workouts_heatmap(df, year=None):
     
     # Update layout
     fig.update_layout(
-        **PLOT_LAYOUT,
         height=250 * n_rows,
         title='Workout Calendar',
-        showlegend=False
+        showlegend=False,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='white')
     )
     
     return fig
@@ -127,6 +166,9 @@ def create_workout_duration_chart(df, period='month'):
     plotly.graph_objects.Figure
         Workout duration chart
     """
+    # Add period columns if they don't exist
+    df = ensure_period_columns(df, period)
+    
     # Check if duration column exists
     if 'Duration (sec)' not in df.columns or df['Duration (sec)'].isna().all():
         return None
@@ -142,8 +184,9 @@ def create_workout_duration_chart(df, period='month'):
     # Group by date and workout name to get unique workouts
     workouts = df.drop_duplicates(subset=['Date', 'Workout Name'])
     
-    # Convert duration to minutes
-    workouts['Duration (min)'] = workouts['Duration (sec)'] / 60
+    # Convert duration to minutes if not already done
+    if 'Duration (min)' not in workouts.columns:
+        workouts['Duration (min)'] = workouts['Duration (sec)'] / 60
     
     # Group by period
     grouped = workouts.groupby(period_col)['Duration (min)'].mean().reset_index()
@@ -157,8 +200,8 @@ def create_workout_duration_chart(df, period='month'):
         y=grouped['Duration (min)'],
         mode='lines+markers',
         name='Average Duration',
-        line=dict(color=THEME['primary'], width=2),
-        marker=dict(size=8, color=THEME['primary'])
+        line=dict(color='#4361EE', width=2),
+        marker=dict(size=8, color='#4361EE')
     ))
     
     # Add rolling average if enough data
@@ -170,12 +213,11 @@ def create_workout_duration_chart(df, period='month'):
             y=grouped['Rolling Avg'],
             mode='lines',
             name='3-Period Moving Average',
-            line=dict(color=THEME['secondary'], width=2, dash='dash')
+            line=dict(color='#4CC9F0', width=2, dash='dash')
         ))
     
     # Update layout
     fig.update_layout(
-        **PLOT_LAYOUT,
         title=f'Average Workout Duration by {period.capitalize()}',
         xaxis_title=period.capitalize(),
         yaxis_title='Duration (minutes)',
@@ -186,7 +228,10 @@ def create_workout_duration_chart(df, period='month'):
             xanchor="right",
             x=1
         ),
-        hovermode='x unified'
+        hovermode='x unified',
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='white')
     )
     
     return fig
@@ -227,15 +272,17 @@ def create_rest_days_analysis(df):
         rest_df,
         x='Rest Days',
         title='Distribution of Rest Days Between Workouts',
-        color_discrete_sequence=[THEME['primary']],
+        color_discrete_sequence=['#4361EE'],
         nbins=min(20, max(5, max(rest_days) + 1))
     )
     
     rest_hist.update_layout(
-        **PLOT_LAYOUT,
         xaxis_title='Number of Rest Days',
         yaxis_title='Frequency',
-        bargap=0.1
+        bargap=0.1,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='white')
     )
     
     # Calculate average rest days per month
@@ -257,14 +304,16 @@ def create_rest_days_analysis(df):
                 y='Rest Days',
                 title='Average Rest Days Between Workouts by Month',
                 markers=True,
-                color_discrete_sequence=[THEME['primary']]
+                color_discrete_sequence=['#4361EE']
             )
             
             rest_trend.update_layout(
-                **PLOT_LAYOUT,
                 xaxis_title='Month',
                 yaxis_title='Average Rest Days',
-                hovermode='x unified'
+                hovermode='x unified',
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='white')
             )
             
             return rest_hist, rest_trend
@@ -289,6 +338,9 @@ def create_workout_metrics_over_time(df, metric='volume', period='month'):
     plotly.graph_objects.Figure
         Workout metrics chart
     """
+    # Add period columns if they don't exist
+    df = ensure_period_columns(df, period)
+    
     # Define the period column
     if period == 'week':
         period_col = 'YearWeek'
@@ -308,7 +360,7 @@ def create_workout_metrics_over_time(df, metric='volume', period='month'):
         
         y_title = 'Average Volume per Workout (kg×reps)'
         title = f'Average Workout Volume per {period.capitalize()}'
-        color = THEME['primary']
+        color = '#4361EE'
         
     elif metric == 'intensity':
         if 'RPE' in df.columns and not df['RPE'].isna().all():
@@ -321,7 +373,7 @@ def create_workout_metrics_over_time(df, metric='volume', period='month'):
             
             y_title = 'Average RPE'
             title = f'Average Workout Intensity (RPE) per {period.capitalize()}'
-            color = THEME['secondary']
+            color = '#3A0CA3'
         else:
             return None
     
@@ -345,7 +397,7 @@ def create_workout_metrics_over_time(df, metric='volume', period='month'):
             
             y_title = 'Average Density (Volume per Minute)'
             title = f'Average Workout Density per {period.capitalize()}'
-            color = THEME['accent']
+            color = '#4CC9F0'
         else:
             return None
     
@@ -374,12 +426,11 @@ def create_workout_metrics_over_time(df, metric='volume', period='month'):
             y=grouped['Rolling Avg'],
             mode='lines',
             name='3-Period Moving Average',
-            line=dict(color=THEME['secondary'] if color != THEME['secondary'] else THEME['accent'], width=2, dash='dash')
+            line=dict(color='#F72585' if color != '#F72585' else '#4CC9F0', width=2, dash='dash')
         ))
     
     # Update layout
     fig.update_layout(
-        **PLOT_LAYOUT,
         title=title,
         xaxis_title=period.capitalize(),
         yaxis_title=y_title,
@@ -390,7 +441,10 @@ def create_workout_metrics_over_time(df, metric='volume', period='month'):
             xanchor="right",
             x=1
         ),
-        hovermode='x unified'
+        hovermode='x unified',
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='white')
     )
     
     return fig
@@ -411,6 +465,9 @@ def create_workout_frequency_chart(df, period='month'):
     plotly.graph_objects.Figure
         Workout frequency chart
     """
+    # Add period columns if they don't exist
+    df = ensure_period_columns(df, period)
+    
     # Define the period column
     if period == 'week':
         period_col = 'YearWeek'
@@ -432,7 +489,7 @@ def create_workout_frequency_chart(df, period='month'):
         y='Count',
         title=f'Workouts per {period.capitalize()}',
         color='Count',
-        color_continuous_scale=COLOR_SCALES['frequency']
+        color_continuous_scale='Viridis'
     )
     
     # Calculate average
@@ -446,7 +503,7 @@ def create_workout_frequency_chart(df, period='month'):
         x1=workout_counts[period_col].iloc[-1],
         y1=avg_workouts,
         line=dict(
-            color=THEME['secondary'],
+            color='#F72585',
             width=2,
             dash="dash",
         ),
@@ -461,16 +518,18 @@ def create_workout_frequency_chart(df, period='month'):
         yshift=10,
         xshift=5,
         font=dict(
-            color=THEME['secondary']
+            color='#F72585'
         )
     )
     
     # Update layout
     fig.update_layout(
-        **PLOT_LAYOUT,
         xaxis_title=period.capitalize(),
         yaxis_title='Number of Workouts',
-        coloraxis_showscale=False
+        coloraxis_showscale=False,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='white')
     )
     
     return fig
@@ -512,7 +571,7 @@ def create_workout_distribution_chart(df):
         y='Count',
         title='Workout Distribution by Day of Week',
         color='Count',
-        color_continuous_scale=COLOR_SCALES['frequency'],
+        color_continuous_scale='Viridis',
         text='Percentage'
     )
     
@@ -524,10 +583,12 @@ def create_workout_distribution_chart(df):
     
     # Update layout
     fig.update_layout(
-        **PLOT_LAYOUT,
         xaxis_title='Day of Week',
         yaxis_title='Number of Workouts',
-        coloraxis_showscale=False
+        coloraxis_showscale=False,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='white')
     )
     
     return fig
@@ -595,7 +656,7 @@ def create_workout_streak_chart(df):
         title='Longest Workout Streaks',
         orientation='h',
         color='length',
-        color_continuous_scale=COLOR_SCALES['progress'],
+        color_continuous_scale='Viridis',
         hover_data=['start', 'end']
     )
     
@@ -606,11 +667,13 @@ def create_workout_streak_chart(df):
     
     # Update layout
     fig.update_layout(
-        **PLOT_LAYOUT,
         xaxis_title='Streak Length (days)',
         yaxis_title='',
         yaxis_showticklabels=False,
-        coloraxis_showscale=False
+        coloraxis_showscale=False,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='white')
     )
     
     return fig
@@ -650,15 +713,17 @@ def create_workout_volume_by_day_chart(df):
         y='Volume',
         title='Average Workout Volume by Day of Week',
         color='Volume',
-        color_continuous_scale=COLOR_SCALES['volume']
+        color_continuous_scale='Viridis'
     )
     
     # Update layout
     fig.update_layout(
-        **PLOT_LAYOUT,
         xaxis_title='Day of Week',
         yaxis_title='Average Volume (kg×reps)',
-        coloraxis_showscale=False
+        coloraxis_showscale=False,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='white')
     )
     
     return fig
