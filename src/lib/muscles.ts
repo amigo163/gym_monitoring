@@ -18,12 +18,14 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
 export const TRAINABLE_GROUPS: MuscleGroup[] = ["Chest", "Back", "Legs", "Shoulders", "Arms", "Core"]
 
 const PATTERNS: [MuscleGroup, RegExp[]][] = [
+  // Hamstring hinges before the Back entry catches "deadlift".
+  ["Legs", [/romanian|stiff[\s-]*leg|straight[\s-]*leg|\brdl\b/]],
   ["Chest", [/bench\s*press/, /push\s*up/, /chest\s*press/, /chest\s*fly/, /incline\s*press/, /decline\s*press/, /\bdip/, /svend\s*press/, /pec\s*deck/, /cable\s*cross/]],
-  ["Back", [/deadlift/, /\brow\b/, /pull[\s-]*up/, /lat\s*pull/, /chin[\s-]*up/, /pulldown/, /back\s*extension/, /good\s*morning/, /hyper\s*extension/, /pull\s*over/, /shrug/, /face\s*pull/, /t\s*bar/]],
+  ["Back", [/deadlift/, /\brow\b/, /pull[\s-]*up/, /lat\s*pull/, /chin[\s-]*up/, /pulldown/, /back\s*extension/, /good\s*morning/, /hyper\s*extension/, /pull\s*over/, /shrug/, /t\s*bar/]],
   ["Legs", [/squat/, /lunge/, /glute/, /leg\s*press/, /leg\s*extension/, /leg\s*curl/, /calf\s*raise/, /hip\s*thrust/, /bulgarian\s*split/, /step\s*up/, /box\s*jump/, /pistol/, /wall\s*sit/, /hip\s*a[bd]duct/]],
-  ["Shoulders", [/shoulder\s*press/, /overhead\s*press/, /military\s*press/, /\bohp\b/, /lateral\s*raise/, /front\s*raise/, /rear\s*delt/, /upright\s*row/, /arnold\s*press/, /reverse\s*fly/, /backward\s*raise/]],
+  ["Shoulders", [/shoulder\s*press/, /overhead\s*press/, /military\s*press/, /\bohp\b/, /lateral\s*raise/, /front\s*raise/, /rear\s*delt/, /upright\s*row/, /arnold\s*press/, /reverse\s*fly/, /backward\s*raise/, /face\s*pull/, /steering\s*wheel/]],
   ["Arms", [/curl/, /tricep/, /extension/, /pushdown/, /skull\s*crusher/, /close\s*grip/, /kickback/]],
-  ["Core", [/crunch/, /sit[\s-]*up/, /plank/, /\bab\b/, /russian\s*twist/, /leg\s*raise/, /mountain\s*climber/, /hollow\s*hold/, /v[\s-]*up/, /bicycle/, /hanging\s*leg/, /knee\s*raise/, /torso\s*rotation/, /leg\s*throw/, /rollout/, /dragon\s*flag/, /toes\s*to\s*bar/]],
+  ["Core", [/crunch/, /sit[\s-]*up/, /plank/, /\bab\b/, /russian\s*twist/, /leg\s*raise/, /mountain\s*climber/, /hollow\s*hold/, /v[\s-]*up/, /bicycle/, /hanging\s*leg/, /knee\s*raise/, /torso\s*rotation/, /leg\s*throw/, /rollout/, /dragon\s*flag/, /toes\s*to\s*bar/, /hypopressive/]],
   ["Cardio", [/\brun/, /cardio/, /elliptical/, /\bbike/, /cycling/, /treadmill/, /rowing/, /jump\s*rope/, /burpee/, /jumping\s*jack/, /sprint/, /hiit/, /interval/, /stairmaster/, /walk/]],
   ["Olympic", [/clean/, /jerk/, /snatch/, /push\s*press/]],
 ]
@@ -38,11 +40,16 @@ export function baseExerciseName(name: string): string {
 }
 
 const cache = new Map<string, MuscleGroup>()
+let overrides = new Map<string, MuscleGroup>()
 
-/** Same lookup order as the original Python app: exact → base name → regex patterns → Other. */
-export function muscleGroupFor(exercise: string): MuscleGroup {
-  const cached = cache.get(exercise)
-  if (cached) return cached
+/** Your muscle-group corrections by exercise name; they win over the automatic lookup. */
+export function setMuscleOverrides(next: Map<string, MuscleGroup>) {
+  overrides = next
+  cache.clear()
+}
+
+/** Automatic lookup, ignoring your overrides. */
+export function defaultMuscleGroup(exercise: string): MuscleGroup {
   const lower = exercise.trim().toLowerCase()
   const base = baseExerciseName(exercise)
   let group: MuscleGroup | undefined = directMap.get(lower) ?? directMap.get(base)
@@ -54,7 +61,14 @@ export function muscleGroupFor(exercise: string): MuscleGroup {
       }
     }
   }
-  group ??= "Other"
+  return group ?? "Other"
+}
+
+/** Your override, else the lookup order of the original Python app: exact → base name → regex patterns → Other. */
+export function muscleGroupFor(exercise: string): MuscleGroup {
+  const cached = cache.get(exercise)
+  if (cached) return cached
+  const group = overrides.get(exercise) ?? defaultMuscleGroup(exercise)
   cache.set(exercise, group)
   return group
 }

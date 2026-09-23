@@ -1,5 +1,5 @@
 import { DAY_MS, addDays, daysBetween } from "../dates"
-import type { ExerciseSession, Profile } from "../types"
+import type { ExerciseSession, Profile, TrackingKind } from "../types"
 import {
   type Factor,
   type MainLift,
@@ -36,14 +36,41 @@ export interface ForecastPoint {
   trend: number
 }
 
+/** What a forecast is in: est. 1RM (kg), most reps in a set, or longest hold (seconds). */
+export type ForecastMetric = "e1rm" | "reps" | "seconds"
+
+const METRIC_OF: Record<TrackingKind, ForecastMetric | null> = { weight: "e1rm", reps: "reps", time: "seconds", distance: null }
+
+const metricValue: Record<ForecastMetric, (s: ExerciseSession) => number> = {
+  e1rm: (s) => s.bestE1rm,
+  reps: (s) => s.bestReps,
+  seconds: (s) => s.bestSeconds,
+}
+
+/** Sessions with a value to forecast from (at least two are needed for a forecast). */
+export function forecastableSessions(sessions: ExerciseSession[]): ExerciseSession[] {
+  const metric = sessions.length ? METRIC_OF[sessions[0].kind] : null
+  return metric ? sessions.filter((s) => metricValue[metric](s) > 0) : []
+}
+
+/**
+ * Rep maxes and hold times grow faster than 1RM: a few percent more strength buys many more
+ * reps near the end of a set, so their headroom is wider.
+ */
+const ENDURANCE_HEADROOM = 2.5
+
+/** The metric an exercise's forecast uses, or null for exercises that aren't forecast (distance). */
+export const forecastMetricFor = (kind: TrackingKind) => METRIC_OF[kind]
+
 export interface StrengthForecast {
   exercise: string
+  metric: ForecastMetric
   mainLift: MainLift | null
-  history: { date: Date; e1rm: number; fitted: number }[]
+  history: { date: Date; value: number; fitted: number }[]
   forecast: ForecastPoint[]
-  /** Estimated strength potential (kg e1RM) at today's bodyweight/age. */
+  /** Estimated potential at today's bodyweight/age, in the forecast's metric. */
   ceiling: number
-  /** Where you are right now (kg e1RM), after any detraining. */
+  /** Where you are right now, after any detraining. */
   current: number
   /** Adaptation rate actually used for the forecast (per week). */
   rate: number
@@ -51,7 +78,7 @@ export interface StrengthForecast {
   dataRate: number | null
   /** Share of the ceiling already reached. */
   percentOfPotential: number
-  /** Expected gain per week right now (kg). */
+  /** Expected gain per week right now, in the forecast's metric. */
   weeklyGain: number
   factors: Factor[]
   detrainingPct: number
@@ -126,24 +153,26 @@ function fitRate(ts: number[], ys: number[], ceiling: number) {
  *   changes the forecast.
  */
 export function forecastStrength(sessions: ExerciseSession[], opts: ForecastOptions): StrengthForecast | null {
-  const points = sessions.filter((s) => s.bestE1rm > 0)
+  const metric = sessions.length ? METRIC_OF[sessions[0].kind] : null
+  if (!metric) return null
+  const points = forecastableSessions(sessions)
   if (points.length < 2) return null
   const { profile, horizonWeeks } = opts
   const today = opts.today ?? new Date()
   const exercise = points[0].exercise
-  const mainLift = mainLiftOf(exercise)
+  const isLoad = metric === "e1rm"
+  const mainLift = isLoad ? mainLiftOf(exercise) : null
 
   const t0 = points[0].date.getTime()
   const ts = points.map((p) => (p.date.getTime() - t0) / WEEK_MS)
-  const ys = points.map((p) => p.bestE1rm)
+  const ys = points.map((p) => metricValue[metric](p))
   const best = Math.max(...ys)
 
   const spanYears = ts.at(-1)! / 52
   const trainingYears = profile.priorTrainingYears + spanYears
   const bw = scalingBodyweight(profile)
-  let ceiling = mainLift
-    ? liftCeilingKg(profile.sex, mainLift, bw, profile.age)
-    : best * (1 + genericHeadroom(trainingYears, profile.age))
+  const headroom = genericHeadroom(trainingYears, profile.age) * (isLoad ? 1 : ENDURANCE_HEADROOM)
+  let ceiling = mainLift ? liftCeilingKg(profile.sex, mainLift, bw, profile.age) : best * (1 + headroom)
   ceiling = Math.max(ceiling, best * 1.05)
 
   // Prior rate from physiology
@@ -208,8 +237,8 @@ export function forecastStrength(sessions: ExerciseSession[], opts: ForecastOpti
   const forecast: ForecastPoint[] = []
   const steps = Math.max(1, Math.round(horizonWeeks))
   for (let h = 0; h <= steps; h++) {
-    // Ceiling tracks projected bodyweight (strength ∝ mass^⅔).
-    const bwRatio = Math.max(0.5, 1 + bwWeekly * h)
+    // A load ceiling tracks projected bodyweight (strength ∝ mass^⅔); reps and holds don't get easier with mass.
+    const bwRatio = isLoad ? Math.max(0.5, 1 + bwWeekly * h) : 1
     const c = Math.max(ceiling * Math.pow(bwRatio, 2 / 3), current)
     const expected = c - (c - current) * Math.exp(-futureRate * h)
     const sd = residualSd * Math.sqrt(1 + h / 6)
@@ -225,8 +254,9 @@ export function forecastStrength(sessions: ExerciseSession[], opts: ForecastOpti
 
   return {
     exercise,
+    metric,
     mainLift,
-    history: points.map((p, j) => ({ date: p.date, e1rm: p.bestE1rm, fitted: model(ts[j]) })),
+    history: points.map((p, j) => ({ date: p.date, value: ys[j], fitted: model(ts[j]) })),
     forecast,
     ceiling,
     current,
@@ -242,11 +272,11 @@ export function forecastStrength(sessions: ExerciseSession[], opts: ForecastOpti
   }
 }
 
-/** Weeks until the forecast reaches `targetKg`, or null if it is beyond the ceiling. */
-export function weeksToTarget(f: StrengthForecast, targetKg: number): number | null {
-  if (targetKg <= f.current) return 0
-  if (targetKg >= f.ceiling * 0.999) return null
-  return -Math.log((f.ceiling - targetKg) / (f.ceiling - f.current)) / f.rate
+/** Weeks until the forecast reaches `target` (in its metric), or null if it is beyond the ceiling. */
+export function weeksToTarget(f: StrengthForecast, target: number): number | null {
+  if (target <= f.current) return 0
+  if (target >= f.ceiling * 0.999) return null
+  return -Math.log((f.ceiling - target) / (f.ceiling - f.current)) / f.rate
 }
 
 export function dateAfterWeeks(from: Date, weeks: number): Date {

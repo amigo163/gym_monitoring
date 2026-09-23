@@ -80,6 +80,8 @@ export interface HeatmapChartProps {
   margin?: Partial<Margin>;
   /** Fixed cell size in pixels. When 0, cells are square and sized to fit the plot. Default: 0 */
   binSize?: number;
+  /** Upper bound for auto-sized cells in `fluid` layout, so short ranges don't balloon in height. Default: no cap */
+  maxBinSize?: number;
   /** Gap between cells in pixels. Default: 2 */
   gap?: number;
   /** Override the default color scale. */
@@ -137,6 +139,7 @@ function computeHeatmapDimensions({
   columnCount,
   rowCount,
   binSize,
+  maxBinSize,
   layout,
   separator,
 }: {
@@ -146,6 +149,7 @@ function computeHeatmapDimensions({
   columnCount: number;
   rowCount: number;
   binSize: number;
+  maxBinSize: number;
   layout: HeatmapLayout;
   separator: Pick<HeatmapSeparatorLayout, "spacing" | "atColumns"> | null;
 }) {
@@ -164,7 +168,10 @@ function computeHeatmapDimensions({
     binWidth = binSize;
     binHeight = binSize;
   } else if (layout === "fluid") {
-    const cellSize = Math.max((innerWidth - totalSpacing) / columnCount, 0);
+    const cellSize = Math.min(
+      Math.max((innerWidth - totalSpacing) / columnCount, 0),
+      maxBinSize
+    );
     binWidth = cellSize;
     binHeight = cellSize;
   } else {
@@ -209,6 +216,7 @@ interface HeatmapChartInnerProps {
   sizingColumnCount?: number;
   margin: Margin;
   binSize: number;
+  maxBinSize: number;
   gap: number;
   layout: HeatmapLayout;
   colorScale: (count: number | null | undefined) => string;
@@ -242,6 +250,7 @@ function HeatmapChartInner({
   sizingColumnCount: sizingColumnCountProp,
   margin,
   binSize,
+  maxBinSize,
   gap,
   layout,
   colorScale,
@@ -311,11 +320,13 @@ function HeatmapChartInner({
         columnCount,
         rowCount,
         binSize,
+        maxBinSize,
         layout,
         separator: separatorLayout,
       }),
     [
       binSize,
+      maxBinSize,
       columnCount,
       layout,
       margin,
@@ -624,6 +635,7 @@ export function HeatmapChart({
   layout = "fluid",
   margin: marginProp,
   binSize = 0,
+  maxBinSize = Number.POSITIVE_INFINITY,
   gap = 2,
   colorScale: colorScaleProp,
   levelColors,
@@ -688,6 +700,7 @@ export function HeatmapChart({
             animateCells={animateCells}
             animationDuration={animationDuration}
             binSize={binSize}
+            maxBinSize={maxBinSize}
             chartPhase={chartPhase}
             chartStatus={status}
             colorScale={colorScale}

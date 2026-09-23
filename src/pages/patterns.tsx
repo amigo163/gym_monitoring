@@ -4,7 +4,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { CategoryBarChart, ChartCard, SERIES, TimeLineChart } from "@/components/viz"
 import { hourCounts, restDayHistogram, weekStreaks, weekdayCounts, weeklySeries } from "@/lib/analysis"
 import { WEEKDAYS, formatDate } from "@/lib/dates"
-import { fmt1, fmtInt } from "@/lib/format"
+import { fmt1, fmtInt, toUnit, weightUnit } from "@/lib/format"
 import { useData } from "@/state/store"
 
 export function PatternsPage() {
@@ -48,9 +48,9 @@ export function PatternsPage() {
         <StatCard hint="Between training days" label="Avg rest" value={`${fmt1(gaps)} days`} />
         <StatCard hint={`Longest: ${streaks.longest}`} label="Current week streak" value={streaks.current} />
         <StatCard
-          hint="kg lifted per minute"
+          hint={`${weightUnit()} lifted per minute`}
           label="Avg density"
-          value={durations.length ? fmtInt(durations.reduce((a, d) => a + d.density, 0) / durations.length) : "–"}
+          value={durations.length ? fmtInt(toUnit(durations.reduce((a, d) => a + d.density, 0) / durations.length)) : "–"}
         />
       </div>
 
@@ -75,8 +75,8 @@ export function PatternsPage() {
         <ChartCard description="Days off between consecutive training days" title="Rest days">
           <CategoryBarChart data={rest} format={fmtInt} series={[{ key: "count", label: "Times", color: SERIES[0] }]} xKey="label" />
         </ChartCard>
-        <ChartCard description="kg lifted per minute of workout" title="Training density">
-          <TimeLineChart data={durations} format={fmtInt} series={[{ key: "density", label: "kg/min", color: SERIES[0] }]} />
+        <ChartCard description={`${weightUnit()} lifted per minute of workout`} title="Training density">
+          <TimeLineChart data={durations} format={(v) => fmtInt(toUnit(v))} series={[{ key: "density", label: `${weightUnit()}/min`, color: SERIES[0] }]} />
         </ChartCard>
       </div>
 

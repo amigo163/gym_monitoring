@@ -14,7 +14,8 @@ import {
   weeklySeries,
 } from "@/lib/analysis"
 import { formatDate } from "@/lib/dates"
-import { fmt1, fmtInt, fmtKg, fmtTonnes } from "@/lib/format"
+import { fmt1, fmtInt, fmtTonnes, weightUnit } from "@/lib/format"
+import { PR_LABEL, fmtMetric, improvementPct } from "@/lib/tracking"
 import { useData } from "@/state/store"
 
 export function OverviewPage() {
@@ -24,7 +25,7 @@ export function OverviewPage() {
   const muscles = useMemo(() => muscleDistribution(rows), [rows])
   const topExercises = useMemo(() => exerciseUsage(sessions).slice(0, 8), [sessions])
   const counts = useMemo(() => dailySets(workouts), [workouts])
-  const recentPrs = prs.filter((p) => p.kind === "e1rm").slice(0, 6)
+  const recentPrs = prs.filter((p) => p.primary).slice(0, 6)
 
   const totalSets = muscles.reduce((a, m) => a + m.sets, 0)
   const pieData = muscles.map((m) => ({ label: m.muscle, value: m.sets, color: MUSCLE_COLOR[m.muscle] }))
@@ -66,7 +67,7 @@ export function OverviewPage() {
         </ChartCard>
 
         <div className="grid gap-4 lg:grid-cols-2">
-          <ChartCard description="Total load lifted per week (kg)" title="Weekly volume">
+          <ChartCard description={`Total load lifted per week (${weightUnit()})`} title="Weekly volume">
             <TimeLineChart
               data={weekly as unknown as Record<string, unknown>[]}
               format={fmtTonnes}
@@ -119,7 +120,7 @@ export function OverviewPage() {
           </ChartCard>
         </div>
 
-        <ChartCard description="Latest estimated one-rep-max records" title="Recent PRs">
+        <ChartCard description="Latest records in each exercise's main metric" title="Recent PRs">
           {recentPrs.length ? (
             <Table>
               <TableHeader>
@@ -127,7 +128,7 @@ export function OverviewPage() {
                   <TableHead>Date</TableHead>
                   <TableHead>Exercise</TableHead>
                   <TableHead className="text-right">Set</TableHead>
-                  <TableHead className="text-right">Est. 1RM</TableHead>
+                  <TableHead className="text-right">Record</TableHead>
                   <TableHead className="text-right">Gain</TableHead>
                 </TableRow>
               </TableHeader>
@@ -137,11 +138,14 @@ export function OverviewPage() {
                     <TableCell className="text-muted-foreground">{formatDate(p.date)}</TableCell>
                     <TableCell className="font-medium">{p.exercise}</TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {fmt1(p.weight)} × {p.reps}
+                      {p.kind === "e1rm" ? `${fmt1(p.weight)} × ${p.reps}` : "–"}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">{fmtKg(p.value)}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      <div>{fmtMetric(p.kind, p.value)}</div>
+                      <div className="text-xs text-muted-foreground">{PR_LABEL[p.kind]}</div>
+                    </TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground">
-                      +{fmt1(p.value - (p.previous ?? 0))} kg
+                      +{fmt1(improvementPct(p.kind, p.previous ?? 0, p.value))}%
                     </TableCell>
                   </TableRow>
                 ))}

@@ -140,6 +140,7 @@ export function CalendarHeatmap({ counts, from, to }: { counts: Map<string, numb
             className="w-full"
             data={columns}
             layout="fluid"
+            maxBinSize={20}
             levelColors={["var(--muted)", "var(--chart-scale-02)", "var(--chart-scale-03)", "var(--chart-scale-04)", "var(--chart-scale-05)"]}
           >
             <HeatmapCells />

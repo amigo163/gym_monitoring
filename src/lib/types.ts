@@ -11,6 +11,19 @@ export type MuscleGroup =
   | "Other"
 
 /**
+ * What an exercise is measured by: load × reps (bench press), reps alone (toes to bar),
+ * hold time (plank) or distance (running).
+ */
+export type TrackingKind = "weight" | "reps" | "time" | "distance"
+
+/** Your corrections to how an exercise was classified; null keeps the automatic choice. */
+export interface ExerciseSettings {
+  exercise: string
+  muscle: MuscleGroup | null
+  kind: TrackingKind | null
+}
+
+/**
  * One set as it's kept in the local database: the Strong export row with units normalized,
  * but before anything that depends on the profile (bodyweight share, e1RM).
  */
@@ -75,6 +88,7 @@ export interface Workout {
 /** Best performance of one exercise within one workout. */
 export interface ExerciseSession {
   exercise: string
+  kind: TrackingKind
   date: Date
   workoutId: string
   topWeight: number
@@ -82,16 +96,28 @@ export interface ExerciseSession {
   volume: number
   sets: number
   reps: number
+  /** Most reps in one set. */
+  bestReps: number
+  /** Longest set, in seconds. */
+  bestSeconds: number
+  totalSeconds: number
+  totalDistanceM: number
+  /** Seconds per km over the session's distance sets; null without distance. */
+  paceSecPerKm: number | null
+  /** The number that tracks progress for this kind of exercise (see `primaryValue`). */
+  primary: number
   avgRpe: number | null
 }
 
-export type PrKind = "e1rm" | "weight" | "volume"
+export type PrKind = "e1rm" | "weight" | "volume" | "reps" | "totalReps" | "duration" | "totalDuration" | "distance" | "pace"
 
 export interface PersonalRecord {
   exercise: string
   muscle: MuscleGroup
   date: Date
   kind: PrKind
+  /** The record in the exercise's main metric (e1RM, most reps, longest hold, distance). */
+  primary: boolean
   value: number
   previous: number | null
   weight: number
@@ -125,4 +151,22 @@ export interface Profile {
   hrvMs: number | null
   hrvBaselineMs: number | null
   bodyweightLog: BodyweightEntry[]
+}
+
+/** What you're working towards on one exercise; every field is optional. */
+export interface ExerciseGoal {
+  exercise: string
+  /**
+   * Target in the exercise's main metric: est. 1RM in kg (on the same effective-load scale as
+   * the forecast), reps in one set, or hold seconds.
+   */
+  target: number | null
+  /** Where you were in that metric when the target was set, to measure progress from. */
+  start: number | null
+  /** Reps per top set; double progression builds from min to max, then adds weight. */
+  repRange: { min: number; max: number } | null
+  /** yyyy-mm-dd */
+  deadline: string | null
+  /** ISO timestamp of the last change. */
+  updatedAt: string
 }

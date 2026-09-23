@@ -10,7 +10,7 @@ import { Slider } from "@/components/ui/slider"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ChartCard, SERIES, TimeLineChart } from "@/components/viz"
 import { dayKey, formatDate, parseDayKey } from "@/lib/dates"
-import { fmt1 } from "@/lib/format"
+import { fmt1, fmtKg, fromUnit, toUnit, weightUnit } from "@/lib/format"
 import { bmi, combine, ffmi, leanMassKg, recoveryFactors } from "@/lib/models/physiology"
 import type { NutritionState, Profile, Sex } from "@/lib/types"
 import { useStore } from "@/state/store"
@@ -112,11 +112,11 @@ export function ProfilePage() {
   const ffmiValue = ffmi(profile)
 
   const [logDate, setLogDate] = useState(dayKey(new Date()))
-  const [logKg, setLogKg] = useState(String(profile.bodyweightKg))
+  const [logKg, setLogKg] = useState(String(Math.round(toUnit(profile.bodyweightKg) * 10) / 10))
   const log = [...profile.bodyweightLog].sort((a, b) => a.date.localeCompare(b.date))
 
   const addEntry = () => {
-    const kg = Number(logKg)
+    const kg = fromUnit(Number(logKg))
     if (!Number.isFinite(kg) || kg < 25 || kg > 350 || !logDate) return
     const next = [...profile.bodyweightLog.filter((e) => e.date !== logDate), { date: logDate, kg }]
     const latest = next.reduce((a, b) => (b.date > a.date ? b : a))
@@ -133,7 +133,7 @@ export function ProfilePage() {
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard hint="Rate multiplier from recovery inputs" label="Recovery capacity" value={`${Math.round(recovery * 100)}%`} />
         <StatCard hint="Body-mass index" label="BMI" value={fmt1(bmi(profile))} />
-        <StatCard hint={profile.bodyFatPct == null ? "Add body fat % to compute" : "Fat-free mass"} label="Lean mass" value={lean ? `${fmt1(lean)} kg` : "–"} />
+        <StatCard hint={profile.bodyFatPct == null ? "Add body fat % to compute" : "Fat-free mass"} label="Lean mass" value={lean ? fmtKg(lean) : "–"} />
         <StatCard hint="Height-normalised; ~25 is a common natural ceiling" label="FFMI" value={ffmiValue ? fmt1(ffmiValue) : "–"} />
       </div>
 
@@ -154,7 +154,16 @@ export function ProfilePage() {
             <div className="grid grid-cols-2 gap-4">
               <NumberField id="age" label="Age" max={100} min={12} onChange={(v) => v != null && set("age", v)} unit="yrs" value={profile.age} />
               <NumberField id="height" label="Height" max={250} min={120} onChange={(v) => v != null && set("heightCm", v)} unit="cm" value={profile.heightCm} />
-              <NumberField id="bw" label="Bodyweight" max={350} min={25} onChange={(v) => v != null && set("bodyweightKg", v)} step={0.1} unit="kg" value={profile.bodyweightKg} />
+              <NumberField
+                id="bw"
+                label="Bodyweight"
+                max={Math.round(toUnit(350))}
+                min={Math.round(toUnit(25))}
+                onChange={(v) => v != null && set("bodyweightKg", fromUnit(v))}
+                step={0.1}
+                unit={weightUnit()}
+                value={Math.round(toUnit(profile.bodyweightKg) * 10) / 10}
+              />
               <NumberField id="bf" label="Body fat" max={60} min={3} onChange={(v) => set("bodyFatPct", v)} optional step={0.5} unit="%" value={profile.bodyFatPct} />
               <NumberField
                 id="prior"
@@ -258,7 +267,7 @@ export function ProfilePage() {
                 <Input id="log-date" onChange={(e) => setLogDate(e.target.value)} type="date" value={logDate} />
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor="log-kg">Weight (kg)</Label>
+                <Label htmlFor="log-kg">Weight ({weightUnit()})</Label>
                 <Input id="log-kg" inputMode="decimal" onChange={(e) => setLogKg(e.target.value)} step={0.1} type="number" value={logKg} />
               </div>
             </div>
@@ -270,7 +279,7 @@ export function ProfilePage() {
                 <li className="flex items-center justify-between rounded-md px-2 py-1 hover:bg-muted" key={e.date}>
                   <span className="text-muted-foreground">{formatDate(parseDayKey(e.date))}</span>
                   <span className="flex items-center gap-2 tabular-nums">
-                    {fmt1(e.kg)} kg
+                    {fmtKg(e.kg)}
                     <Button
                       aria-label={`Remove ${e.date}`}
                       onClick={() => set("bodyweightLog", profile.bodyweightLog.filter((x) => x.date !== e.date))}
@@ -287,7 +296,7 @@ export function ProfilePage() {
           <div className="lg:col-span-2">
             <TimeLineChart
               data={log.map((e) => ({ date: parseDayKey(e.date), kg: e.kg }))}
-              format={fmt1}
+              format={(v) => fmt1(toUnit(v))}
               height={240}
               series={[{ key: "kg", label: "Bodyweight", color: SERIES[0] }]}
             />

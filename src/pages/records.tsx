@@ -8,26 +8,35 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { CategoryBarChart, ChartCard, EmptyChart, SERIES } from "@/components/viz"
 import { monthlySeries, summarizeExercise } from "@/lib/analysis"
 import { formatDate, formatMonth } from "@/lib/dates"
-import { fmt1, fmtInt, fmtKg } from "@/lib/format"
+import { fmt1, fmtInt } from "@/lib/format"
 import { MUSCLE_GROUPS } from "@/lib/muscles"
-import type { PrKind } from "@/lib/types"
+import { PRIMARY_PR, PR_LABEL, fmtMetric, fmtPrimary, primaryLabel, improvementPct, prKindsFor, sessionMetric } from "@/lib/tracking"
+import type { ExerciseSession, PrKind } from "@/lib/types"
 import { useData } from "@/state/store"
 
-const KIND_LABEL: Record<PrKind, string> = { e1rm: "Est. 1RM", weight: "Weight", volume: "Volume" }
+type LogFilter = "main" | "all"
+
+/** The strongest secondary record for the bests table: heaviest set, total reps or time, best pace. */
+function secondaryBest(list: ExerciseSession[]): { kind: PrKind; value: number } | null {
+  const kind = prKindsFor(list[0].kind, list[0].exercise).find((k) => k !== PRIMARY_PR[list[0].kind])
+  if (!kind) return null
+  const values = list.map((s) => sessionMetric(s, kind)).filter((v) => v > 0)
+  if (!values.length) return null
+  return { kind, value: kind === "pace" ? Math.min(...values) : Math.max(...values) }
+}
 
 export function RecordsPage() {
   const { sessions, prs, workouts } = useData()
   const [query, setQuery] = useState("")
   const [muscle, setMuscle] = useState("all")
-  const [kind, setKind] = useState<PrKind>("e1rm")
+  const [filter, setFilter] = useState<LogFilter>("main")
 
   const bests = useMemo(
     () =>
       [...sessions.values()]
         .map((list) => {
           const s = summarizeExercise(list)!
-          const bestVolume = list.reduce((a, b) => (b.volume > a.volume ? b : a))
-          return { ...s, bestVolume, prCount: prs.filter((p) => p.exercise === s.exercise && p.kind === "e1rm").length }
+          return { ...s, secondary: secondaryBest(list), prCount: prs.filter((p) => p.exercise === s.exercise && p.primary).length }
         })
         .sort((a, b) => b.sessions - a.sessions),
     [sessions, prs],
@@ -37,7 +46,7 @@ export function RecordsPage() {
   const matches = (exercise: string, m: string) =>
     exercise.toLowerCase().includes(query.toLowerCase()) && (muscle === "all" || m === muscle)
   const filteredBests = bests.filter((b) => matches(b.exercise, b.muscle))
-  const log = prs.filter((p) => p.kind === kind && matches(p.exercise, p.muscle))
+  const log = prs.filter((p) => (filter === "all" || p.primary) && matches(p.exercise, p.muscle))
 
   return (
     <>
@@ -63,7 +72,7 @@ export function RecordsPage() {
         </div>
       </PageHeader>
 
-      <ChartCard description="Estimated-1RM records per month" title="PR frequency">
+      <ChartCard description="Records in each exercise's main metric (est. 1RM, most reps, longest hold or distance) per month" title="PR frequency">
         <CategoryBarChart
           data={monthly.map((m) => ({ month: formatMonth(m.date), prs: m.prs }))}
           format={fmtInt}
@@ -81,9 +90,8 @@ export function RecordsPage() {
                 <TableRow>
                   <TableHead>Exercise</TableHead>
                   <TableHead className="hidden sm:table-cell">Group</TableHead>
-                  <TableHead className="text-right">Est. 1RM</TableHead>
-                  <TableHead className="text-right">Heaviest</TableHead>
-                  <TableHead className="hidden text-right md:table-cell">Best volume</TableHead>
+                  <TableHead className="text-right">Best</TableHead>
+                  <TableHead className="hidden text-right md:table-cell">Also</TableHead>
                   <TableHead className="text-right">PRs</TableHead>
                   <TableHead className="hidden text-right md:table-cell">Set on</TableHead>
                 </TableRow>
@@ -95,12 +103,23 @@ export function RecordsPage() {
                     <TableCell className="hidden sm:table-cell">
                       <MuscleBadge muscle={b.muscle} />
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">{b.bestE1rm.bestE1rm ? fmtKg(b.bestE1rm.bestE1rm) : "–"}</TableCell>
-                    <TableCell className="text-right tabular-nums">{fmtKg(b.bestWeight.topWeight)}</TableCell>
-                    <TableCell className="hidden text-right tabular-nums md:table-cell">{fmtInt(b.bestVolume.volume)} kg</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      <div>{fmtPrimary(b.best)}</div>
+                      <div className="text-xs text-muted-foreground">{primaryLabel(b.best)}</div>
+                    </TableCell>
+                    <TableCell className="hidden text-right tabular-nums md:table-cell">
+                      {b.secondary ? (
+                        <>
+                          <div>{fmtMetric(b.secondary.kind, b.secondary.value)}</div>
+                          <div className="text-xs text-muted-foreground">{PR_LABEL[b.secondary.kind]}</div>
+                        </>
+                      ) : (
+                        "–"
+                      )}
+                    </TableCell>
                     <TableCell className="text-right tabular-nums">{b.prCount}</TableCell>
                     <TableCell className="hidden text-right text-muted-foreground md:table-cell">
-                      {formatDate((b.bestE1rm.bestE1rm ? b.bestE1rm : b.bestWeight).date)}
+                      {formatDate(b.best.date)}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -114,16 +133,13 @@ export function RecordsPage() {
 
       <ChartCard
         action={
-          <ToggleGroup onValueChange={(v) => v && setKind(v as PrKind)} size="sm" type="single" value={kind} variant="outline">
-            {(Object.keys(KIND_LABEL) as PrKind[]).map((k) => (
-              <ToggleGroupItem key={k} value={k}>
-                {KIND_LABEL[k]}
-              </ToggleGroupItem>
-            ))}
+          <ToggleGroup onValueChange={(v) => v && setFilter(v as LogFilter)} size="sm" type="single" value={filter} variant="outline">
+            <ToggleGroupItem value="main">Main</ToggleGroupItem>
+            <ToggleGroupItem value="all">All records</ToggleGroupItem>
           </ToggleGroup>
         }
         className="mt-4"
-        description="Each time you beat a previous best. First sessions are baselines, not PRs."
+        description="Each time you beat a previous best. Main shows each exercise's headline metric; All adds heaviest set, volume, totals and pace. First sessions are baselines, not PRs."
         title="PR log"
       >
         {log.length ? (
@@ -133,6 +149,7 @@ export function RecordsPage() {
                 <TableRow>
                   <TableHead>Date</TableHead>
                   <TableHead>Exercise</TableHead>
+                  <TableHead className="hidden sm:table-cell">Record</TableHead>
                   <TableHead className="text-right">Previous</TableHead>
                   <TableHead className="text-right">New</TableHead>
                   <TableHead className="text-right">Gain</TableHead>
@@ -143,10 +160,11 @@ export function RecordsPage() {
                   <TableRow key={`${p.exercise}-${p.kind}-${p.date.getTime()}`}>
                     <TableCell className="text-muted-foreground">{formatDate(p.date)}</TableCell>
                     <TableCell className="font-medium">{p.exercise}</TableCell>
-                    <TableCell className="text-right tabular-nums">{fmt1(p.previous ?? 0)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{fmt1(p.value)}</TableCell>
+                    <TableCell className="hidden text-muted-foreground sm:table-cell">{PR_LABEL[p.kind]}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmtMetric(p.kind, p.previous ?? 0)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmtMetric(p.kind, p.value)}</TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground">
-                      +{fmt1(((p.value - (p.previous ?? 0)) / (p.previous || 1)) * 100)}%
+                      +{fmt1(improvementPct(p.kind, p.previous ?? 0, p.value))}%
                     </TableCell>
                   </TableRow>
                 ))}

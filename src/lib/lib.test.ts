@@ -11,11 +11,12 @@ import { acuteChronic, dailyLoads, fitnessFatigue, readiness } from "./models/lo
 import { DEFAULT_PROFILE, bodyweightAt, classify, dots, mainLiftOf } from "./models/physiology"
 import { detrainingFraction, forecastStrength, weeksToTarget } from "./models/strength"
 import { personalLandmarks, planVolume } from "./models/volume"
-import { detectUnit, planNextSession } from "./models/next-session"
-import { muscleGroupFor } from "./muscles"
+import { planNextSession } from "./models/next-session"
+import { muscleGroupFor, setMuscleOverrides } from "./muscles"
 import { estimateOneRepMax } from "./one-rep-max"
 import { parseStrongCsv } from "./strong"
-import type { ExerciseSession, SetRow } from "./types"
+import { fmtDuration, fmtMetric, inferTrackingKind } from "./tracking"
+import type { ExerciseGoal, ExerciseSession, SetRow } from "./types"
 
 const csv = readFileSync(new URL("../../public/sample-strong.csv", import.meta.url), "utf8")
 const rows = parseStrongCsv(csv, bodyweightAt(DEFAULT_PROFILE))
@@ -57,6 +58,14 @@ describe("muscle mapping", () => {
     ["Lateral Glute Kickback (Cable)", "Legs"],
     ["Knee Raise (Captain's Chair)", "Core"],
     ["Torso Rotation (Cable)", "Core"],
+    ["Chin Up", "Back"],
+    ["Hypopressives", "Core"],
+    ["Steering Wheel", "Shoulders"],
+    ["Straight Leg Deadlift", "Legs"],
+    ["Romanian Deadlift (Barbell)", "Legs"],
+    ["Deadlift (Barbell)", "Back"],
+    ["Face Pull (Cable)", "Shoulders"],
+    ["Reverse Fly (Dumbbell)", "Shoulders"],
   ])("%s → %s", (name, group) => {
     expect(muscleGroupFor(name)).toBe(group)
   })
@@ -91,7 +100,7 @@ describe("analysis", () => {
 
   it("detects plateaus", () => {
     const flat = [100, 100, 99, 100, 105].map(
-      (v, i) => ({ bestE1rm: v, topWeight: v, date: new Date(2024, 0, i + 1) }) as ExerciseSession,
+      (v, i) => ({ bestE1rm: v, topWeight: v, primary: v, date: new Date(2024, 0, i + 1) }) as ExerciseSession,
     )
     expect(detectPlateaus(flat, 4)).toEqual([expect.objectContaining({ sessions: 4, value: 100 })])
   })
@@ -204,26 +213,24 @@ describe("next session", () => {
       e1rm: estimateOneRepMax(weight, reps),
       volume: weight * reps,
     }))
-  const plan = (rows: SetRow[], asOf: Date) =>
+  const plan = (rows: SetRow[], asOf: Date, goal: Partial<ExerciseGoal> | null = null) =>
     planNextSession({
       exercise: "Bench Press (Barbell)",
       rows,
       sessions: buildExerciseSessions(rows).get("Bench Press (Barbell)")!,
       profile: DEFAULT_PROFILE,
       asOf,
+      goal: goal && { exercise: "Bench Press (Barbell)", target: null, start: null, repRange: null, deadline: null, updatedAt: "", ...goal },
     })!
 
-  it("detects pounds that Strong exported as kilograms", () => {
-    expect(detectUnit([135 * LB, 30 * LB, 0])).toBe("lb")
-    expect(detectUnit([49.5 * LB])).toBe("lb")
-    expect(detectUnit([60, 62.5, 20])).toBe("kg")
-  })
-
   it("adds weight once every top set hits the usual reps", () => {
-    const rows = [...bench(1, [[60, 8], [60, 7], [60, 7]]), ...bench(4, [[60, 8], [60, 8], [60, 8]])]
+    const w = 135 * LB
+    const rows = [...bench(1, [[w, 8], [w, 7], [w, 7]]), ...bench(4, [[w, 8], [w, 8], [w, 8]])]
     const p = plan(rows, new Date(2024, 0, 5, 12))
     expect(p.action).toBe("add-weight")
-    expect(p.target).toEqual({ weight: 62.5, reps: 8, sets: 3 })
+    // Plates go up 5 lb, since Strong data is always logged in pounds.
+    expect(p.target.weight / LB).toBeCloseTo(140)
+    expect(p.target).toMatchObject({ reps: 8, sets: 3, seconds: null })
     expect(p.typicalGapDays).toBe(3)
   })
 
@@ -231,7 +238,7 @@ describe("next session", () => {
     const rows = [...bench(1, [[60, 8], [60, 8]]), ...bench(4, [[62.5, 8], [62.5, 6]])]
     const p = plan(rows, new Date(2024, 0, 5, 12))
     expect(p.action).toBe("add-reps")
-    expect(p.target).toEqual({ weight: 62.5, reps: 7, sets: 2 })
+    expect(p.target).toEqual({ weight: 62.5, reps: 7, sets: 2, seconds: null })
   })
 
   it("waits for the muscle to recover and follows your usual gap", () => {
@@ -252,5 +259,231 @@ describe("next session", () => {
     const p = plan(rows, new Date(2024, 1, 20))
     expect(p.action).toBe("ease-back")
     expect(p.target.weight).toBeLessThan(100)
+  })
+
+  it("builds reps through the goal's range before adding weight", () => {
+    const rows = [...bench(1, [[60, 6], [60, 6]]), ...bench(4, [[60, 6], [60, 6]])]
+    const asOf = new Date(2024, 0, 5, 12)
+    // Without a range, 6 is the usual rep count, so it's time for more weight.
+    expect(plan(rows, asOf).action).toBe("add-weight")
+    const p = plan(rows, asOf, { repRange: { min: 5, max: 8 } })
+    expect(p.action).toBe("add-reps")
+    expect(p.target).toEqual({ weight: 60, reps: 7, sets: 2, seconds: null })
+    expect(p.repRangeFromGoal).toBe(true)
+  })
+
+  it("adds weight and drops to the bottom of the range at the top", () => {
+    const w = 135 * LB
+    const rows = [...bench(1, [[w, 8], [w, 8]]), ...bench(4, [[w, 8], [w, 8]])]
+    const p = plan(rows, new Date(2024, 0, 5, 12), { repRange: { min: 5, max: 8 } })
+    expect(p.action).toBe("add-weight")
+    expect(p.target.weight / LB).toBeCloseTo(140)
+    expect(p.target).toMatchObject({ reps: 5, sets: 2, seconds: null })
+  })
+
+  it("re-weights sets well outside a new rep range", () => {
+    const rows = [...bench(1, [[50, 12], [50, 12]]), ...bench(4, [[50, 12], [50, 12]])]
+    const p = plan(rows, new Date(2024, 0, 5, 12), { repRange: { min: 3, max: 5 } })
+    expect(p.action).toBe("adjust")
+    expect(p.target.reps).toBe(3)
+    expect(p.target.weight).toBeGreaterThan(50)
+    // Heavier, but still below a true 3-rep max.
+    expect(p.targetE1rm).toBeLessThan(estimateOneRepMax(50, 12))
+  })
+
+  it("reports progress towards a target 1RM", () => {
+    const rows = [...bench(1, [[60, 8], [60, 8]]), ...bench(4, [[60, 8], [60, 8]])]
+    const p = plan(rows, new Date(2024, 0, 5, 12), { target: 100, start: 70 })
+    expect(p.goal?.target).toBe(100)
+    expect(p.goal?.progress).toBeCloseTo((p.targetE1rm - 70) / 30)
+    expect(plan(rows, new Date(2024, 0, 5, 12)).goal).toBeNull()
+  })
+
+  it("suggests lower reps for a 1RM goal trained with high reps", () => {
+    const rows = [...bench(1, [[50, 12]]), ...bench(4, [[50, 12]])]
+    expect(plan(rows, new Date(2024, 0, 5, 12), { target: 100 }).note).toMatch(/3–6/)
+    expect(plan(rows, new Date(2024, 0, 5, 12), { target: 100, repRange: { min: 10, max: 12 } }).note).toBeNull()
+  })
+})
+
+describe("user overrides", () => {
+  it("win over the automatic muscle group until cleared", () => {
+    setMuscleOverrides(new Map([["Toes To Bar", "Other"]]))
+    expect(muscleGroupFor("Toes To Bar")).toBe("Other")
+    setMuscleOverrides(new Map())
+    expect(muscleGroupFor("Toes To Bar")).toBe("Core")
+  })
+})
+
+/** Working sets for one exercise, one workout per `day` of January 2024. */
+function setsOf(exercise: string, days: [day: number, sets: Partial<SetRow>[]][]): SetRow[] {
+  return days.flatMap(([day, sets]) =>
+    sets.map((s, i) => {
+      const weight = s.weight ?? 0
+      const reps = s.reps ?? 0
+      return {
+        workoutId: `w${day}`,
+        date: new Date(2024, 0, day, 18),
+        workoutName: "Workout",
+        durationSec: 3600,
+        exercise,
+        setOrder: i + 1,
+        isWarmup: false,
+        weight,
+        reps,
+        rpe: null,
+        distanceM: null,
+        seconds: null,
+        notes: "",
+        muscle: muscleGroupFor(exercise),
+        effectiveLoad: weight,
+        e1rm: estimateOneRepMax(weight, reps),
+        volume: weight * reps,
+        ...s,
+      }
+    }),
+  )
+}
+
+describe("tracking kinds", () => {
+  it("infers what each exercise is measured by", () => {
+    expect(inferTrackingKind(setsOf("Plank", [[1, [{ seconds: 60 }, { seconds: 45 }]]]))).toBe("time")
+    expect(inferTrackingKind(setsOf("Toes To Bar", [[1, [{ reps: 10 }, { reps: 8 }]]]))).toBe("reps")
+    expect(inferTrackingKind(setsOf("Running (Treadmill)", [[1, [{ distanceM: 4000, seconds: 1200 }]]]))).toBe("distance")
+    expect(inferTrackingKind(setsOf("Bench Press (Barbell)", [[1, [{ weight: 60, reps: 8 }]]]))).toBe("weight")
+    // Bodyweight lifts keep an est. 1RM that includes your bodyweight.
+    expect(inferTrackingKind(setsOf("Pull Up", [[1, [{ reps: 8 }]]]))).toBe("weight")
+    // Mostly bodyweight, with the odd weighted set: still rep-based.
+    expect(inferTrackingKind(setsOf("Knee Raise (Captain's Chair)", [[1, [{ reps: 12 }, { reps: 12 }, { reps: 10, weight: 5 }]]]))).toBe("reps")
+  })
+
+  it("infers kinds for sessions built without them", () => {
+    const sessions = buildExerciseSessions(setsOf("Plank", [[1, [{ seconds: 60 }]]]))
+    expect(sessions.get("Plank")![0]).toMatchObject({ kind: "time", bestSeconds: 60, primary: 60 })
+  })
+
+  it("records the longest hold for timed exercises", () => {
+    const rows = setsOf("Plank", [
+      [1, [{ seconds: 60 }, { seconds: 45 }]],
+      [3, [{ seconds: 75 }, { seconds: 50 }]],
+      [5, [{ seconds: 70 }]],
+    ])
+    const prs = findPersonalRecords(buildExerciseSessions(rows), rows)
+    expect(prs.filter((p) => p.primary).map((p) => [p.kind, p.value, p.previous])).toEqual([["duration", 75, 60]])
+    expect(prs.find((p) => p.kind === "totalDuration")?.value).toBe(125)
+  })
+
+  it("records the most reps for rep-based exercises", () => {
+    const rows = setsOf("Toes To Bar", [
+      [1, [{ reps: 10 }, { reps: 8 }]],
+      [3, [{ reps: 12 }, { reps: 9 }]],
+    ])
+    const sessions = buildExerciseSessions(rows)
+    expect(sessions.get("Toes To Bar")![1]).toMatchObject({ kind: "reps", bestReps: 12, reps: 21, primary: 12 })
+    const prs = findPersonalRecords(sessions, rows)
+    expect(prs.find((p) => p.primary)).toMatchObject({ kind: "reps", value: 12, previous: 10, reps: 12 })
+  })
+
+  it("counts a faster pace as a record", () => {
+    const rows = setsOf("Running (Treadmill)", [
+      [1, [{ distanceM: 4000, seconds: 1440 }]],
+      [3, [{ distanceM: 4000, seconds: 1320 }]],
+    ])
+    const prs = findPersonalRecords(buildExerciseSessions(rows), rows)
+    expect(prs.find((p) => p.kind === "pace")).toMatchObject({ value: 330, previous: 360 })
+  })
+
+  it("formats values with their units", () => {
+    expect(fmtDuration(75)).toBe("1:15")
+    expect(fmtDuration(3725)).toBe("1:02:05")
+    expect(fmtMetric("pace", 330)).toBe("5:30 /km")
+    expect(fmtMetric("reps", 12)).toBe("12 reps")
+  })
+
+  it("forecasts max reps for rep-based exercises", () => {
+    const rows = setsOf(
+      "Toes To Bar",
+      [8, 9, 9, 10, 11, 11, 12].map((reps, i): [number, Partial<SetRow>[]] => [1 + i * 4, [{ reps }]]),
+    )
+    const f = forecastStrength(buildExerciseSessions(rows).get("Toes To Bar")!, {
+      profile: DEFAULT_PROFILE,
+      horizonWeeks: 8,
+      today: new Date(2024, 0, 26),
+    })!
+    expect(f.metric).toBe("reps")
+    expect(f.mainLift).toBeNull()
+    expect(f.history.map((h) => h.value)).toEqual([8, 9, 9, 10, 11, 11, 12])
+    expect(f.forecast.at(-1)!.expected).toBeGreaterThan(f.current)
+    expect(f.ceiling).toBeGreaterThan(12)
+  })
+
+  it("doesn't forecast distance work", () => {
+    const rows = setsOf("Running", [
+      [1, [{ distanceM: 4000, seconds: 1440 }]],
+      [3, [{ distanceM: 5000, seconds: 1800 }]],
+    ])
+    expect(forecastStrength(buildExerciseSessions(rows).get("Running")!, { profile: DEFAULT_PROFILE, horizonWeeks: 4 })).toBeNull()
+  })
+
+  it("counts timed holds towards training load, but not stretching", () => {
+    const plank = setsOf("Plank", [[1, [{ seconds: 60 }]]])
+    const stretch = setsOf("Stretching", [[1, [{ seconds: 600 }]]])
+    expect(dailyLoads(plank).get("2024-01-01")).toBeGreaterThan(0)
+    expect(dailyLoads(stretch).get("2024-01-01")).toBe(0)
+  })
+})
+
+describe("next session for reps and holds", () => {
+  const planFor = (exercise: string, rows: SetRow[], asOf: Date, goal: Partial<ExerciseGoal> | null = null) =>
+    planNextSession({
+      exercise,
+      rows,
+      sessions: buildExerciseSessions(rows).get(exercise)!,
+      profile: DEFAULT_PROFILE,
+      asOf,
+      goal: goal && { exercise, target: null, start: null, repRange: null, deadline: null, updatedAt: "", ...goal },
+    })
+
+  it("adds time to every hold", () => {
+    const rows = setsOf("Plank", [
+      [1, [{ seconds: 60 }, { seconds: 60 }]],
+      [4, [{ seconds: 60 }, { seconds: 50 }]],
+    ])
+    const p = planFor("Plank", rows, new Date(2024, 0, 6, 12))!
+    expect(p.kind).toBe("time")
+    expect(p.action).toBe("add-time")
+    // From the shortest hold, 0:50 → 1:00.
+    expect(p.target).toEqual({ weight: 0, reps: 0, sets: 2, seconds: 60 })
+    expect(p.isPr).toBe(false)
+    expect(p.lastSets.map((s) => s.seconds)).toEqual([60, 50])
+  })
+
+  it("suggests a harder variation past three minutes", () => {
+    const rows = setsOf("Plank", [[1, [{ seconds: 200 }]], [4, [{ seconds: 190 }]]])
+    const p = planFor("Plank", rows, new Date(2024, 0, 6, 12))!
+    expect(p.action).toBe("repeat")
+    expect(p.reason).toMatch(/harder/)
+  })
+
+  it("measures goal progress for holds in seconds", () => {
+    const rows = setsOf("Plank", [[1, [{ seconds: 60 }]], [4, [{ seconds: 70 }]]])
+    const p = planFor("Plank", rows, new Date(2024, 0, 6, 12), { target: 120, start: 60 })!
+    expect(p.targetValue).toBe(80)
+    expect(p.goal).toEqual({ target: 120, start: 60, progress: expect.closeTo(20 / 60) })
+  })
+
+  it("adds reps for rep-based exercises and flags rep PRs", () => {
+    const rows = setsOf("Toes To Bar", [[1, [{ reps: 10 }, { reps: 10 }]], [4, [{ reps: 10 }, { reps: 9 }]]])
+    const p = planFor("Toes To Bar", rows, new Date(2024, 0, 6, 12))!
+    expect(p.kind).toBe("reps")
+    expect(p.action).toBe("add-reps")
+    expect(p.target).toMatchObject({ weight: 0, reps: 10, sets: 2 })
+    expect(p.targetValue).toBe(10)
+    expect(p.isPr).toBe(false)
+  })
+
+  it("skips stretching and cardio", () => {
+    expect(planFor("Stretching", setsOf("Stretching", [[1, [{ seconds: 600 }]]]), new Date(2024, 0, 3))).toBeNull()
+    expect(planFor("Cycling (Indoor)", setsOf("Cycling (Indoor)", [[1, [{ seconds: 1200 }]]]), new Date(2024, 0, 3))).toBeNull()
   })
 })

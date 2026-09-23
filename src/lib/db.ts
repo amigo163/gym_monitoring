@@ -1,6 +1,6 @@
 import { type DBSchema, type IDBPDatabase, openDB } from "idb"
 import { dayKey } from "./dates"
-import type { Profile, StoredSet } from "./types"
+import type { ExerciseGoal, ExerciseSettings, Profile, StoredSet } from "./types"
 
 /** What an import changed, counted in workouts. */
 export interface ImportSummary {
@@ -36,11 +36,19 @@ export interface ProfileSnapshot {
   profile: Omit<Profile, "bodyweightLog">
 }
 
+/** One snapshot per exercise per day, so you can see how a goal changed. */
+export interface GoalSnapshot extends ExerciseGoal {
+  date: string // yyyy-mm-dd
+}
+
 interface GymDb extends DBSchema {
   sets: { key: string; value: StoredSet; indexes: { workoutKey: string } }
   imports: { key: number; value: ImportRecord }
   profile: { key: string; value: Profile }
   profileHistory: { key: string; value: ProfileSnapshot }
+  goals: { key: string; value: ExerciseGoal }
+  goalHistory: { key: [string, string]; value: GoalSnapshot }
+  exerciseSettings: { key: string; value: ExerciseSettings }
 }
 
 export type GymDatabase = IDBPDatabase<GymDb>
@@ -48,13 +56,30 @@ export type GymDatabase = IDBPDatabase<GymDb>
 const CURRENT_PROFILE = "current"
 
 export function openGymDb(name = "gymviz"): Promise<GymDatabase> {
-  return openDB<GymDb>(name, 1, {
-    upgrade(db) {
-      const sets = db.createObjectStore("sets", { keyPath: "key" })
-      sets.createIndex("workoutKey", "workoutKey")
-      db.createObjectStore("imports", { keyPath: "id", autoIncrement: true })
-      db.createObjectStore("profile")
-      db.createObjectStore("profileHistory", { keyPath: "date" })
+  return openDB<GymDb>(name, 3, {
+    async upgrade(db, oldVersion, _newVersion, tx) {
+      if (oldVersion < 1) {
+        const sets = db.createObjectStore("sets", { keyPath: "key" })
+        sets.createIndex("workoutKey", "workoutKey")
+        db.createObjectStore("imports", { keyPath: "id", autoIncrement: true })
+        db.createObjectStore("profile")
+        db.createObjectStore("profileHistory", { keyPath: "date" })
+      }
+      if (oldVersion < 2) {
+        db.createObjectStore("goals", { keyPath: "exercise" })
+        db.createObjectStore("goalHistory", { keyPath: ["exercise", "date"] })
+      }
+      if (oldVersion < 3) {
+        db.createObjectStore("exerciseSettings", { keyPath: "exercise" })
+        // Goals were 1RM-only (targetE1rm/startE1rm) before reps- and time-based exercises.
+        for (const store of [tx.objectStore("goals"), tx.objectStore("goalHistory")]) {
+          for (let cursor = await store.openCursor(); cursor; cursor = await cursor.continue()) {
+            const { targetE1rm, startE1rm, ...rest } = cursor.value as GoalSnapshot & { targetE1rm?: number | null; startE1rm?: number | null }
+            if (targetE1rm === undefined && startE1rm === undefined) continue
+            await cursor.update({ ...rest, target: rest.target ?? targetE1rm ?? null, start: rest.start ?? startE1rm ?? null })
+          }
+        }
+      }
     },
   })
 }
@@ -189,4 +214,33 @@ export async function saveProfile(db: GymDatabase, profile: Profile, now = new D
 
 export function loadProfileHistory(db: GymDatabase): Promise<ProfileSnapshot[]> {
   return db.getAll("profileHistory")
+}
+
+export function loadGoals(db: GymDatabase): Promise<ExerciseGoal[]> {
+  return db.getAll("goals")
+}
+
+/** Save or (with null) remove an exercise's goal, keeping that day's snapshot either way. */
+export async function saveGoal(db: GymDatabase, exercise: string, goal: ExerciseGoal | null, now = new Date()): Promise<void> {
+  const tx = db.transaction(["goals", "goalHistory"], "readwrite")
+  const cleared: ExerciseGoal = { exercise, target: null, start: null, repRange: null, deadline: null, updatedAt: now.toISOString() }
+  await Promise.all([
+    goal ? tx.objectStore("goals").put(goal) : tx.objectStore("goals").delete(exercise),
+    tx.objectStore("goalHistory").put({ ...(goal ?? cleared), date: dayKey(now) }),
+    tx.done,
+  ])
+}
+
+export function loadGoalHistory(db: GymDatabase): Promise<GoalSnapshot[]> {
+  return db.getAll("goalHistory")
+}
+
+export function loadExerciseSettings(db: GymDatabase): Promise<ExerciseSettings[]> {
+  return db.getAll("exerciseSettings")
+}
+
+/** Save or (with nothing overridden) remove your corrections for one exercise. */
+export async function saveExerciseSettings(db: GymDatabase, settings: ExerciseSettings): Promise<void> {
+  if (settings.muscle == null && settings.kind == null) await db.delete("exerciseSettings", settings.exercise)
+  else await db.put("exerciseSettings", settings)
 }

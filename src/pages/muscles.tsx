@@ -12,7 +12,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { CategoryBarChart, ChartCard, EmptyChart, SERIES, SeriesLegend, TimeLineChart } from "@/components/viz"
 import { exerciseUsage, muscleDistribution, weeklyMuscleSets, workingSets } from "@/lib/analysis"
 import { formatMonth, startOfMonth } from "@/lib/dates"
-import { fmt1, fmtInt, fmtTonnes } from "@/lib/format"
+import { fmt1, fmtInt, fmtTonnes, weightUnit } from "@/lib/format"
 import { personalLandmarks, VOLUME_GROUPS } from "@/lib/models/volume"
 import { TRAINABLE_GROUPS } from "@/lib/muscles"
 import type { MuscleGroup } from "@/lib/types"
@@ -96,7 +96,7 @@ export function MusclesPage() {
             </RadarChart>
           </div>
         </ChartCard>
-        <ChartCard className="lg:col-span-3" description="Volume (kg) per month, stacked by group" title="Monthly volume by group">
+        <ChartCard className="lg:col-span-3" description={`Volume (${weightUnit()}) per month, stacked by group`} title="Monthly volume by group">
           <SeriesLegend series={TRAINABLE_GROUPS.map((g) => ({ key: g, label: g, color: MUSCLE_COLOR[g] }))} />
           <CategoryBarChart
             data={monthly}

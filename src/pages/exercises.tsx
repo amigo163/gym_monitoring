@@ -3,6 +3,8 @@ import { useMemo, useState } from "react"
 import { ReferenceArea } from "@/components/charts/reference-area"
 import { ExerciseSelect, MuscleBadge, PageHeader, StatCard } from "@/components/common"
 import { Badge } from "@/components/ui/badge"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { CategoryBarChart, ChartCard, EmptyChart, SERIES, TimeLineChart } from "@/components/viz"
@@ -14,23 +16,66 @@ import {
   summarizeExercise,
 } from "@/lib/analysis"
 import { formatDate, formatMonth } from "@/lib/dates"
-import { fmt1, fmtInt, fmtKg, fmtPct } from "@/lib/format"
-import { useData } from "@/state/store"
+import { fmt1, fmtInt, fmtPct, toUnit } from "@/lib/format"
+import { MUSCLE_GROUPS, defaultMuscleGroup } from "@/lib/muscles"
+import {
+  KIND_LABEL,
+  PRIMARY_PR,
+  PR_LABEL,
+  TRACKING_KINDS,
+  fmtDuration,
+  fmtMetric,
+  fmtPrimary,
+  lowerIsBetter,
+  primaryKind,
+  primaryLabel,
+  prKindsFor,
+  sessionMetric,
+} from "@/lib/tracking"
+import type { ExerciseSession, MuscleGroup, PrKind, TrackingKind } from "@/lib/types"
+import { useData, useStore } from "@/state/store"
 
-type Metric = "bestE1rm" | "topWeight" | "volume"
+const METRIC_DESCRIPTION: Record<PrKind, string> = {
+  e1rm: "Best estimated one-rep max per session",
+  weight: "Heaviest working set per session",
+  volume: "Load × reps per session",
+  reps: "Most reps in one set per session",
+  totalReps: "Reps across all working sets per session",
+  duration: "Longest set per session",
+  totalDuration: "Time across all working sets per session",
+  distance: "Distance per session",
+  pace: "Time per km per session (lower is faster)",
+}
 
-const METRICS: { value: Metric; label: string; description: string }[] = [
-  { value: "bestE1rm", label: "Est. 1RM", description: "Best estimated one-rep max per session" },
-  { value: "topWeight", label: "Top weight", description: "Heaviest working set per session" },
-  { value: "volume", label: "Volume", description: "Load × reps per session" },
-]
+/** Chart and table formatting without units, for axes and dense columns. */
+function fmtAxis(kind: PrKind): (v: number) => string {
+  if (kind === "duration" || kind === "totalDuration" || kind === "pace") return fmtDuration
+  if (kind === "distance") return (v) => fmt1(v / 1000)
+  if (kind === "volume") return (v) => fmtInt(toUnit(v))
+  if (kind === "weight" || kind === "e1rm") return (v) => fmt1(toUnit(v))
+  return kind === "reps" || kind === "totalReps" ? fmtInt : fmt1
+}
+
+/** The records that have data for this exercise, main metric first. */
+function metricsFor(list: ExerciseSession[]): PrKind[] {
+  if (!list.length) return []
+  return prKindsFor(list[0].kind, list[0].exercise).filter((k) => list.some((s) => sessionMetric(s, k) > 0))
+}
+
+function bestOf(list: ExerciseSession[], kind: PrKind): ExerciseSession | null {
+  const withValue = list.filter((s) => sessionMetric(s, kind) > 0)
+  if (!withValue.length) return null
+  const better = (a: ExerciseSession, b: ExerciseSession) =>
+    lowerIsBetter(kind) ? sessionMetric(b, kind) < sessionMetric(a, kind) : sessionMetric(b, kind) > sessionMetric(a, kind)
+  return withValue.reduce((a, b) => (better(a, b) ? b : a))
+}
 
 export function ExercisesPage() {
   const { sessions, workouts, prs } = useData()
   const usage = useMemo(() => exerciseUsage(sessions), [sessions])
   const [picked, setPicked] = useState<string | null>(null)
   const exercise = picked && sessions.has(picked) ? picked : (usage[0]?.exercise ?? "")
-  const [metric, setMetric] = useState<Metric>("bestE1rm")
+  const [pickedMetric, setMetric] = useState<PrKind | null>(null)
 
   const list = useMemo(() => sessions.get(exercise) ?? [], [sessions, exercise])
   const summary = useMemo(() => summarizeExercise(list), [list])
@@ -38,9 +83,14 @@ export function ExercisesPage() {
   const improved = useMemo(() => mostImproved(sessions), [sessions])
   const monthly = useMemo(() => monthlySeries(workouts, prs), [workouts, prs])
 
-  const metricInfo = METRICS.find((m) => m.value === metric)!
-  const hasE1rm = list.some((s) => s.bestE1rm > 0)
-  const chartData = useMemo(() => list.map((s) => ({ date: s.date, value: s[metric] })), [list, metric])
+  const metrics = useMemo(() => metricsFor(list), [list])
+  const metric = pickedMetric && metrics.includes(pickedMetric) ? pickedMetric : (metrics[0] ?? "e1rm")
+  const secondary = metrics.find((m) => m !== metric && m !== PRIMARY_PR[list[0]?.kind ?? "weight"]) ?? null
+  const secondaryBest = secondary ? bestOf(list, secondary) : null
+  const chartData = useMemo(
+    () => list.filter((s) => sessionMetric(s, metric) > 0).map((s) => ({ date: s.date, value: sessionMetric(s, metric) })),
+    [list, metric],
+  )
 
   return (
     <>
@@ -48,53 +98,50 @@ export function ExercisesPage() {
         <ExerciseSelect exercises={usage} onChange={setPicked} value={exercise} />
       </PageHeader>
 
+      {exercise ? <ClassificationEditor exercise={exercise} key={exercise} /> : null}
+
       {summary ? (
         <div className="grid gap-4">
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <StatCard hint={<MuscleBadge muscle={summary.muscle} />} label="Sessions" value={summary.sessions} />
             <StatCard
-              hint={hasE1rm ? `on ${formatDate(summary.bestE1rm.date)}` : "Needs weight and ≤ 20 reps"}
-              label="Best est. 1RM"
-              value={hasE1rm ? fmtKg(summary.bestE1rm.bestE1rm) : "–"}
+              hint={summary.best.primary > 0 ? `Best, on ${formatDate(summary.best.date)}` : "Nothing measurable logged"}
+              label={primaryLabel(summary.best)}
+              value={summary.best.primary > 0 ? fmtPrimary(summary.best) : "–"}
             />
             <StatCard
-              hint={`on ${formatDate(summary.bestWeight.date)}`}
-              label="Heaviest set"
-              value={fmtKg(summary.bestWeight.topWeight)}
+              hint={secondaryBest ? `on ${formatDate(secondaryBest.date)}` : "–"}
+              label={secondary ? PR_LABEL[secondary] : "–"}
+              value={secondary && secondaryBest ? fmtMetric(secondary, sessionMetric(secondaryBest, secondary)) : "–"}
             />
             <StatCard
               hint="First → latest session"
               icon={TrendingUp}
               label="Change"
-              value={
-                summary.e1rmChangePct != null
-                  ? fmtPct(summary.e1rmChangePct)
-                  : summary.weightChangePct != null
-                    ? fmtPct(summary.weightChangePct)
-                    : "–"
-              }
+              value={summary.primaryChangePct != null ? fmtPct(summary.primaryChangePct) : "–"}
             />
           </div>
 
           <ChartCard
             action={
               <ToggleGroup
-                onValueChange={(v) => v && setMetric(v as Metric)}
+                onValueChange={(v) => v && setMetric(v as PrKind)}
                 size="sm"
                 type="single"
                 value={metric}
                 variant="outline"
               >
-                {METRICS.map((m) => (
-                  <ToggleGroupItem key={m.value} value={m.value}>
-                    {m.label}
+                {metrics.map((m) => (
+                  <ToggleGroupItem key={m} value={m}>
+                    {PR_LABEL[m]}
                   </ToggleGroupItem>
                 ))}
               </ToggleGroup>
             }
             description={
               <>
-                {metricInfo.description}
+                {METRIC_DESCRIPTION[metric]}
+                {metric === "distance" ? " (km)" : ""}
                 {plateaus.length ? " · shaded bands are plateaus (4+ sessions without a new best)" : ""}
               </>
             }
@@ -102,8 +149,8 @@ export function ExercisesPage() {
           >
             <TimeLineChart
               data={chartData}
-              format={metric === "volume" ? fmtInt : fmt1}
-              series={[{ key: "value", label: metricInfo.label, color: SERIES[0] }]}
+              format={fmtAxis(metric)}
+              series={[{ key: "value", label: PR_LABEL[metric], color: SERIES[0] }]}
             >
               {plateaus.map((p) => (
                 <ReferenceArea
@@ -128,7 +175,7 @@ export function ExercisesPage() {
                       </span>
                       <span className="flex items-center gap-2 text-muted-foreground">
                         <Badge variant="secondary">{p.sessions} sessions</Badge>
-                        stuck at {fmtKg(p.value)}
+                        stuck at {fmtMetric(primaryKind(summary.last), p.value)}
                       </span>
                     </li>
                   ))}
@@ -145,9 +192,11 @@ export function ExercisesPage() {
                     <TableRow>
                       <TableHead>Date</TableHead>
                       <TableHead className="text-right">Sets</TableHead>
-                      <TableHead className="text-right">Top</TableHead>
-                      <TableHead className="text-right">Est. 1RM</TableHead>
-                      <TableHead className="text-right">Volume</TableHead>
+                      {metrics.map((m) => (
+                        <TableHead className="text-right" key={m}>
+                          {PR_LABEL[m]}
+                        </TableHead>
+                      ))}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -155,9 +204,14 @@ export function ExercisesPage() {
                       <TableRow key={s.workoutId}>
                         <TableCell className="text-muted-foreground">{formatDate(s.date)}</TableCell>
                         <TableCell className="text-right tabular-nums">{s.sets}</TableCell>
-                        <TableCell className="text-right tabular-nums">{fmt1(s.topWeight)}</TableCell>
-                        <TableCell className="text-right tabular-nums">{s.bestE1rm ? fmt1(s.bestE1rm) : "–"}</TableCell>
-                        <TableCell className="text-right tabular-nums">{fmtInt(s.volume)}</TableCell>
+                        {metrics.map((m) => {
+                          const v = sessionMetric(s, m)
+                          return (
+                            <TableCell className="text-right tabular-nums" key={m}>
+                              {v > 0 ? fmtAxis(m)(v) : "–"}
+                            </TableCell>
+                          )
+                        })}
                       </TableRow>
                     ))}
                   </TableBody>
@@ -186,8 +240,8 @@ export function ExercisesPage() {
                 {improved.map((e) => (
                   <TableRow className="cursor-pointer" key={e.exercise} onClick={() => setPicked(e.exercise)}>
                     <TableCell className="font-medium">{e.exercise}</TableCell>
-                    <TableCell className="text-right tabular-nums">{fmt1(e.from)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{fmt1(e.to)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmtMetric(PRIMARY_PR[e.kind], e.from)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmtMetric(PRIMARY_PR[e.kind], e.to)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmtPct(e.changePct)}</TableCell>
                   </TableRow>
                 ))}
@@ -207,5 +261,53 @@ export function ExercisesPage() {
         </ChartCard>
       </div>
     </>
+  )
+}
+
+/** Correct how an exercise is classified: its muscle group and what it's measured by. */
+function ClassificationEditor({ exercise }: { exercise: string }) {
+  const { exerciseSettings, setExerciseSettings } = useStore()
+  const { autoKinds } = useData()
+  const settings = exerciseSettings[exercise] ?? { exercise, muscle: null, kind: null }
+  const autoKind = autoKinds.get(exercise) ?? "weight"
+  const save = (patch: Partial<typeof settings>) => setExerciseSettings({ ...settings, ...patch, exercise })
+  return (
+    <div className="mb-4 flex flex-wrap items-end gap-3">
+      <div className="grid gap-1.5">
+        <Label htmlFor="exercise-kind">Measured by</Label>
+        <Select onValueChange={(v) => save({ kind: v === "auto" ? null : (v as TrackingKind) })} value={settings.kind ?? "auto"}>
+          <SelectTrigger className="w-48" id="exercise-kind">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto">Auto · {KIND_LABEL[autoKind]}</SelectItem>
+            {TRACKING_KINDS.map((k) => (
+              <SelectItem key={k} value={k}>
+                {KIND_LABEL[k]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="exercise-muscle">Muscle group</Label>
+        <Select onValueChange={(v) => save({ muscle: v === "auto" ? null : (v as MuscleGroup) })} value={settings.muscle ?? "auto"}>
+          <SelectTrigger className="w-48" id="exercise-muscle">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto">Auto · {defaultMuscleGroup(exercise)}</SelectItem>
+            {MUSCLE_GROUPS.map((m) => (
+              <SelectItem key={m} value={m}>
+                {m}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <p className="basis-full text-xs text-muted-foreground sm:basis-auto sm:pb-2">
+        Records, forecasts and next-session targets follow these. Auto is guessed from what you logged.
+      </p>
+    </div>
   )
 }

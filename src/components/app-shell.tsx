@@ -36,6 +36,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import type { DateRangeKey } from "@/lib/analysis"
 import { formatDate } from "@/lib/dates"
 import { describeImport } from "@/lib/db"
+import type { WeightUnit } from "@/lib/format"
 import { useStore } from "@/state/store"
 
 export type PageId = "overview" | "exercises" | "muscles" | "patterns" | "records" | "predictions" | "profile"
@@ -133,7 +134,7 @@ const RANGES: { value: DateRangeKey; label: string }[] = [
 ]
 
 export function AppShell({ page, onNavigate, children }: { page: PageId; onNavigate: (p: PageId) => void; children: ReactNode }) {
-  const { data, error, lastImport, range, setRange, clearData } = useStore()
+  const { data, error, lastImport, range, setRange, unit, setUnit, clearData } = useStore()
   const theme = useTheme()
   const rangeMatters = page !== "predictions" && page !== "profile"
 
@@ -205,12 +206,27 @@ export function AppShell({ page, onNavigate, children }: { page: PageId; onNavig
                 ))}
               </ToggleGroup>
             ) : null}
+            <ToggleGroup
+              aria-label="Weight unit"
+              onValueChange={(v) => v && setUnit(v as WeightUnit)}
+              size="sm"
+              type="single"
+              value={unit}
+              variant="outline"
+            >
+              <ToggleGroupItem aria-label="Show weights in kilograms" value="kg">
+                kg
+              </ToggleGroupItem>
+              <ToggleGroupItem aria-label="Show weights in pounds" value="lb">
+                lb
+              </ToggleGroupItem>
+            </ToggleGroup>
             <Button aria-label="Toggle theme" onClick={theme.toggle} size="icon" variant="ghost">
               {theme.dark ? <Sun /> : <Moon />}
             </Button>
           </div>
         </header>
-        <main className="mx-auto w-full max-w-7xl min-w-0 p-4 md:p-6">{children}</main>
+        <main className="mx-auto w-full max-w-7xl min-w-0 p-4 md:p-6" key={unit}>{children}</main>
       </SidebarInset>
     </SidebarProvider>
   )

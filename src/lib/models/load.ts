@@ -2,10 +2,14 @@ import { addDays, dayKey, startOfDay } from "../dates"
 import type { Profile, SetRow } from "../types"
 import { clamp } from "./physiology"
 
+/** Seconds of a hold that count like one rep (≈ the time under tension of a controlled rep). */
+const SECONDS_PER_REP = 3
+
 /**
  * Internal training load of one set in arbitrary units: reps weighted by
  * relative intensity (load ÷ best e1RM so far for that exercise). Proximity to
- * failure (RPE) scales it when logged. Cardio uses minutes.
+ * failure (RPE) scales it when logged. Cardio uses minutes; timed holds (planks)
+ * count one rep per few seconds; stretching and mobility ("Other") don't count.
  */
 export function dailyLoads(rows: SetRow[]): Map<string, number> {
   const bestSoFar = new Map<string, number>()
@@ -15,6 +19,8 @@ export function dailyLoads(rows: SetRow[]): Map<string, number> {
     let impulse: number
     if (r.muscle === "Cardio") {
       impulse = (r.seconds ?? 0) / 60
+    } else if (r.reps <= 0) {
+      impulse = r.muscle === "Other" ? 0 : ((r.seconds ?? 0) / SECONDS_PER_REP) * 0.5
     } else {
       const best = Math.max(bestSoFar.get(r.exercise) ?? 0, r.e1rm)
       if (r.e1rm > 0) bestSoFar.set(r.exercise, best)
