@@ -33,7 +33,8 @@ function PageFallback() {
 }
 
 function Content({ page: id }: { page: PageId }) {
-  const { data } = useStore()
+  const { ready, data } = useStore()
+  if (!ready) return <PageFallback />
   // The profile doesn't need workout data; everything else does.
   if (id !== "profile" && !data) return <DataUpload />
   const Page = PAGES[id]

@@ -1,7 +1,7 @@
 import Papa from "papaparse"
 import { bodyweightShare, isAssisted, muscleGroupFor } from "./muscles"
 import { estimateOneRepMax } from "./one-rep-max"
-import type { SetRow } from "./types"
+import type { SetRow, StoredSet } from "./types"
 
 const LBS_TO_KG = 0.45359237
 
@@ -50,8 +50,11 @@ function parseDate(text: string): Date | null {
 /** Returns the bodyweight (kg) to use on a given date. */
 export type BodyweightAt = (date: Date) => number | null
 
-/** Parse a Strong app CSV export into normalized set rows. */
-export function parseStrongCsv(text: string, bodyweightAt: BodyweightAt = () => null): SetRow[] {
+/**
+ * Parse a Strong app CSV export into sets ready for the local database. Keys are derived from
+ * the data itself, so importing the same export twice yields the same keys.
+ */
+export function parseStrongExport(text: string): StoredSet[] {
   const result = Papa.parse<RawRow>(text.trim(), {
     header: true,
     skipEmptyLines: true,
@@ -68,49 +71,89 @@ export function parseStrongCsv(text: string, bodyweightAt: BodyweightAt = () => 
     )
   }
 
-  const rows: SetRow[] = []
+  const sets: StoredSet[] = []
+  const positions = new Map<string, number>()
+  // The same exercise can appear twice in a workout with the set order restarting.
+  const occurrences = new Map<string, number>()
   for (const raw of result.data) {
-    const date = parseDate(raw["Date"] ?? "")
+    const date = raw["Date"]?.trim() ?? ""
     const exercise = raw["Exercise Name"]?.trim()
-    if (!date || !exercise) continue
+    if (!parseDate(date) || !exercise) continue
     // Newer Strong exports include "Rest Timer" pseudo-sets.
-    const setOrderRaw = (raw["Set Order"] ?? "").trim()
-    if (/rest/i.test(setOrderRaw)) continue
-
-    const reps = num(raw["Reps"]) ?? 0
-    const weight = parseWeightKg(raw)
-    const rpe = num(raw["RPE"])
-    const share = bodyweightShare(exercise)
-    const bw = share > 0 ? bodyweightAt(date) : null
-    let effectiveLoad = weight
-    if (bw != null) {
-      effectiveLoad = isAssisted(exercise) ? Math.max(bw * share - weight, 0) : bw * share + weight
-    }
+    const setOrder = (raw["Set Order"] ?? "").trim()
+    if (/rest/i.test(setOrder)) continue
 
     const workoutName = raw["Workout Name"]?.trim() || "Workout"
-    const workoutNo = raw["Workout #"]?.trim()
-    rows.push({
-      workoutId: workoutNo ? `w${workoutNo}` : `${date.toISOString()}|${workoutName}`,
+    const workoutKey = `${date}|${workoutName}`
+    const position = positions.get(workoutKey) ?? 0
+    positions.set(workoutKey, position + 1)
+    const base = `${workoutKey}|${exercise}|${setOrder}`
+    const n = occurrences.get(base) ?? 0
+    occurrences.set(base, n + 1)
+
+    sets.push({
+      key: `${base}#${n}`,
+      workoutKey,
       date,
       workoutName,
       durationSec: parseDuration(raw),
       exercise,
-      setOrder: num(setOrderRaw) ?? 0,
-      isWarmup: /^w/i.test(setOrderRaw),
-      weight,
-      reps,
-      rpe,
+      setOrder,
+      position,
+      weightKg: parseWeightKg(raw),
+      reps: num(raw["Reps"]) ?? 0,
+      rpe: num(raw["RPE"]),
       distanceM: num(raw["Distance (meters)"] ?? raw["Distance"]),
       seconds: num(raw["Seconds"]),
       notes: raw["Notes"]?.trim() ?? "",
-      muscle: muscleGroupFor(exercise),
-      effectiveLoad,
-      e1rm: estimateOneRepMax(effectiveLoad, reps, rpe),
-      volume: effectiveLoad * reps,
     })
   }
 
-  if (!rows.length) throw new StrongParseError("No sets found in the file.")
-  rows.sort((a, b) => a.date.getTime() - b.date.getTime() || a.setOrder - b.setOrder)
-  return rows
+  if (!sets.length) throw new StrongParseError("No sets found in the file.")
+  return sets
+}
+
+/** Derive analysis rows from stored sets, using the bodyweight on each set's date. */
+export function toSetRows(sets: StoredSet[], bodyweightAt: BodyweightAt = () => null): SetRow[] {
+  const dates = new Map<string, Date>()
+  const rows = sets.map((s): [SetRow, number] => {
+    let date = dates.get(s.date)
+    if (!date) {
+      date = parseDate(s.date)!
+      dates.set(s.date, date)
+    }
+    const share = bodyweightShare(s.exercise)
+    const bw = share > 0 ? bodyweightAt(date) : null
+    let effectiveLoad = s.weightKg
+    if (bw != null) {
+      effectiveLoad = isAssisted(s.exercise) ? Math.max(bw * share - s.weightKg, 0) : bw * share + s.weightKg
+    }
+    const row: SetRow = {
+      workoutId: s.workoutKey,
+      date,
+      workoutName: s.workoutName,
+      durationSec: s.durationSec,
+      exercise: s.exercise,
+      setOrder: num(s.setOrder) ?? 0,
+      isWarmup: /^w/i.test(s.setOrder),
+      weight: s.weightKg,
+      reps: s.reps,
+      rpe: s.rpe,
+      distanceM: s.distanceM,
+      seconds: s.seconds,
+      notes: s.notes,
+      muscle: muscleGroupFor(s.exercise),
+      effectiveLoad,
+      e1rm: estimateOneRepMax(effectiveLoad, s.reps, s.rpe),
+      volume: effectiveLoad * s.reps,
+    }
+    return [row, s.position]
+  })
+  rows.sort(([a, pa], [b, pb]) => a.date.getTime() - b.date.getTime() || a.setOrder - b.setOrder || pa - pb)
+  return rows.map(([row]) => row)
+}
+
+/** Parse a Strong app CSV export into normalized set rows. */
+export function parseStrongCsv(text: string, bodyweightAt: BodyweightAt = () => null): SetRow[] {
+  return toSetRows(parseStrongExport(text), bodyweightAt)
 }

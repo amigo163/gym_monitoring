@@ -10,6 +10,32 @@ export type MuscleGroup =
   | "Compound"
   | "Other"
 
+/**
+ * One set as it's kept in the local database: the Strong export row with units normalized,
+ * but before anything that depends on the profile (bodyweight share, e1RM).
+ */
+export interface StoredSet {
+  /** Stable across exports: workout key, exercise, set order and occurrence. */
+  key: string
+  /** Workout start time as exported plus the workout name. */
+  workoutKey: string
+  /** "yyyy-mm-dd hh:mm:ss" exactly as exported (local time). */
+  date: string
+  workoutName: string
+  durationSec: number
+  exercise: string
+  /** Raw "Set Order" value: a number, or "W"/"D"… for warm-up and drop sets. */
+  setOrder: string
+  /** Row position within its workout in the export, to keep the logged order. */
+  position: number
+  weightKg: number
+  reps: number
+  rpe: number | null
+  distanceM: number | null
+  seconds: number | null
+  notes: string
+}
+
 /** One logged set, normalized from a Strong CSV row. */
 export interface SetRow {
   workoutId: string
