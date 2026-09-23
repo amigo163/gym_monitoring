@@ -1,236 +1,121 @@
-# GymViz - Advanced Workout Analytics
+# GymViz
 
-GymViz is a Streamlit-based dashboard application that provides advanced analytics and visualization for workout data from the Strong app. The application allows users to upload their Strong app export (CSV format) and gain insights into their workout patterns, exercise progression, and muscle group balance.
+Local analytics and predictions for [Strong](https://www.strong.app/) workout exports. A lightweight Vite + React app built with
+[shadcn/ui](https://ui.shadcn.com) components and [Bklit](https://bklit.com) charts. It runs entirely in your browser: there is no
+backend and your data never leaves your machine.
 
-## Features
+## Quick start
 
-- **Dashboard Overview**: Quick view of key metrics and workout patterns
-- **Exercise Analysis**: Detailed analysis of exercise progression and performance
-- **Muscle Groups**: Analysis of muscle group balance and development
-- **Workout Patterns**: Insights into workout frequency, duration, and consistency
-- **Progress Tracking**: Track PRs (Personal Records) and strength progression
-- **Records Registry**: Repository of all your personal records
-
-## Project Structure
-
-The project follows a modular structure with clear separation of concerns:
-
-```
-gymviz/
-│
-├── app/                       # Application code
-│   ├── __init__.py            # Package initialization
-│   ├── main.py                # Entry point
-│   ├── components/            # Reusable UI components
-│   │   ├── __init__.py
-│   │   ├── sidebar.py         # Sidebar component
-│   │   ├── metrics_card.py    # Metrics display component
-│   │   └── filters.py         # Data filtering components
-│   │
-│   └── pages/                 # Dashboard pages
-│       ├── __init__.py
-│       ├── overview.py        # Overview dashboard
-│       ├── exercise_analysis.py
-│       ├── muscle_groups.py
-│       ├── workout_patterns.py
-│       ├── progress_tracking.py
-│       └── records_registry.py
-│
-├── data/                      # Data handling
-│   ├── __init__.py
-│   ├── parser.py              # CSV parsing functions
-│   ├── processor.py           # Data processing and transformations
-│   ├── cache.py               # Caching functionality
-│   └── samples/               # Sample data files
-│       └── strong_sample.csv
-│
-├── analysis/                  # Data analysis
-│   ├── __init__.py
-│   ├── exercise.py            # Exercise analysis functions
-│   ├── workout.py             # Workout analysis functions
-│   └── progress.py            # Progress tracking analysis
-│
-├── visualization/             # Visualization code
-│   ├── __init__.py
-│   ├── themes.py              # Theme management
-│   ├── charts/                # Chart creation
-│   │   ├── __init__.py
-│   │   ├── exercise_charts.py
-│   │   ├── workout_charts.py
-│   │   └── progress_charts.py
-│   │
-│   └── assets/                # Static assets
-│       ├── css/
-│       │   └── style.css
-│       └── js/
-│           └── utils.js
-│
-├── utils/                     # Utility functions
-│   ├── __init__.py
-│   ├── date_utils.py          # Date manipulation utilities
-│   └── export.py              # Export functionality
-│
-├── config/                    # Configuration
-│   ├── __init__.py
-│   ├── settings.py            # Application settings
-│   └── mappings.py            # Exercise-to-muscle mappings
-│
-└── tests/                     # Tests
-    ├── __init__.py
-    ├── test_parser.py
-    ├── test_processor.py
-    └── test_analysis.py
+```bash
+pnpm install
+pnpm dev          # http://localhost:5173
 ```
 
-## Installation
+Export your data from Strong (**Settings → Export Strong Data**), then drop the CSV on the page. Or click **Try the sample data**.
+The file and your profile are kept in `localStorage`, so a reload keeps your data.
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/your_username/gymviz.git
-   cd gymviz
-   ```
+| Script | What it does |
+| --- | --- |
+| `pnpm dev` | Start the dev server |
+| `pnpm build` | Type-check and build a static site into `dist/` |
+| `pnpm preview` | Serve the production build |
+| `pnpm test` | Run the unit tests (parsing, analysis and every model) |
+| `pnpm lint` | Lint with oxlint |
 
-2. Create a virtual environment and activate it:
-   ```bash
-   python -m venv venv
-   # On Windows
-   venv\Scripts\activate
-   # On macOS/Linux
-   source venv/bin/activate
-   ```
+## Pages
 
-3. Install the dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+**Analytics**: everything the previous Streamlit app did, plus a few additions.
 
-## Usage
+- **Overview**: key stats, a training calendar, weekly volume and sets, muscle-group split, most-trained exercises and recent PRs.
+- **Exercises**: per-exercise progression (est. 1RM / top weight / volume), plateau detection shaded on the chart, a session log,
+  the most-improved ranking and exercise variety per month.
+- **Muscle groups**: a balance radar (whole range vs. last 4 weeks), monthly volume by group, and weekly sets against your
+  personal volume landmarks.
+- **Workout patterns**: frequency, duration, training density, day of week, time of day, rest days and routines.
+- **Records**: current bests for every exercise, PR frequency and a searchable PR log (est. 1RM, weight, volume).
 
-1. Run the Streamlit app:
-   ```bash
-   streamlit run app/main.py
-   ```
+A global 3M / 6M / 1Y / All range filters the analytics pages. The models always use your full history.
 
-2. Open your browser and navigate to `http://localhost:8501`
+**Modelling**
 
-3. Upload your Strong app export CSV file using the sidebar, or use the default `strong.csv` if available in the root directory.
+- **Body & health**: sex, age, height, bodyweight (with a dated log), body fat, prior training experience, sleep, stress,
+  energy balance, protein, resting HR and HRV. It also shows BMI, lean mass, FFMI and how each input affects adaptation.
+- **Predictions**, in four tabs:
+  - **Strength**: an est. 1RM forecast with an 80% range, what-if sliders (sleep, stress, protein, energy balance), a
+    goal-date calculator, forecast rep maxes and a breakdown of the factors driving the forecast.
+  - **Volume**: personal MEV / MAV / MRV per muscle group, a mesocycle plan (progressive sets with deloads) and projected
+    weekly tonnage.
+  - **Fatigue & readiness**: the Banister fitness–fatigue model with 4-week projections (keep going / deload / rest), the
+    acute:chronic workload ratio with risk zones, and a readiness score.
+  - **Standards**: bodyweight-scaled strength standards for squat, bench, deadlift and OHP, a projected date for reaching
+    the next level, and your DOTS score.
 
-## Data Format
+## The models
 
-GymViz expects a CSV export from the Strong app with the following columns:
-- Workout #
-- Date
-- Workout Name
-- Duration (sec)
-- Exercise Name
-- Set Order
-- Weight (kg)
-- Reps
-- RPE (optional)
-- Distance (meters) (optional)
-- Seconds (optional)
-- Notes (optional)
-- Workout Notes (optional)
+All models live in `src/lib/models/` as plain TypeScript with unit tests.
 
-## Customization
+### Strength (`strength.ts`)
 
-You can customize the app's appearance and behavior by modifying the settings in `config/settings.py`.
-
-### Dark Mode Support
-
-GymViz is optimized for dark mode, with a sleek, modern interface that reduces eye strain during late-night analysis sessions.
-
-## Recent Improvements
-
-1. **Default CSV Detection**: The app now detects and offers to use a `strong.csv` file from the root directory without requiring upload.
-
-2. **Fixed YearMonth Error**: Resolved the KeyError issues with YearMonth and YearWeek by ensuring these columns are created during data preprocessing.
-
-3. **Dark Mode Optimization**: Updated all charts and UI components to support dark mode with improved readability and reduced eye strain.
-
-4. **Improved Error Handling**: Added comprehensive error handling throughout the application to provide useful feedback when issues occur.
-
-5. **Performance Enhancements**: Optimized data processing and visualization for faster loading and smoother interactions.
-
-6. **Date Range Defaults**: Added support for starting the date range from 2023, making it easier to analyze longer periods.
-
-7. **Responsive Design**: Improved mobile responsiveness for better use on tablets and phones.
-
-8. **Modular Architecture**: Completely restructured the codebase to follow a modular design with separation of concerns.
-
-9. **Graceful Fallbacks**: Added fallback functionality when certain features or data columns are not available.
-
-10. **Enhanced Visuals**: Improved chart aesthetics with consistent styling and better color palettes.
-
-## Dependencies
-
-- Python 3.9+
-- Streamlit
-- Pandas
-- NumPy
-- Plotly
-- Matplotlib (optional)
-- Seaborn (optional)
-
-## Requirements
+Strength approaches a personal ceiling with diminishing returns:
 
 ```
-streamlit>=1.22.0
-pandas>=1.5.0
-numpy>=1.23.0
-plotly>=5.13.0
-matplotlib>=3.6.0
-seaborn>=0.12.0
+e1RM(t) = C − (C − S₀)·e^(−k·t)
 ```
 
-## Data Privacy
+- **C (potential)**: for the main barbell lifts, bodyweight-scaled strength standards (strength ∝ mass^⅔) between the
+  "advanced" and "elite" levels. It uses lean mass when body fat is known and is adjusted for age. Other exercises get
+  headroom above their current best that shrinks with training age.
+- **k (rate)**: fitted to your sessions and blended in log space with a physiological prior (6 pseudo-observations). The
+  prior is a base rate multiplied by factors for:
+  - sleep (Knowles 2018)
+  - stress (Bartholomew 2008)
+  - energy balance
+  - protein (plateau at 1.6 g/kg, Morton 2018)
+  - age (after 35)
+  - weekly frequency for the lift (Schoenfeld 2016)
+  - weekly sets for the muscle group relative to its landmarks
+- **Scenario**: the what-if inputs rescale k for the forecast period. Energy balance also projects a bodyweight change,
+  which moves C.
+- **Detraining**: after 3+ weeks off, strength declines ≈0.6 %/week, capped at 15% (Bosquet 2013).
+- **Uncertainty**: an 80% band from the residual spread, widening with the horizon.
 
-GymViz processes all data locally on your machine. No workout data is sent to any external servers.
+Estimated 1RM uses Brzycki up to 10 reps and Epley up to 20. When RPE is logged, reps in reserve are added. Bodyweight
+movements (dips, pull-ups, push-ups…) add your bodyweight share on the date of the set, and assisted variations subtract
+the assistance.
 
-## Contributing
+### Volume (`volume.ts`)
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Renaissance Periodization-style landmarks per muscle group. MRV scales with recovery capacity (sleep, stress, diet,
+protein, age), and MEV rises with training age. The plan adds 1–2 sets per week up to MRV, deloads every 5th week, and
+restarts each block slightly higher. Projected tonnage = planned sets × typical reps × working load, with the load growing
+at your forecast strength rate.
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+### Fatigue & readiness (`load.ts`)
 
-## License
+- **Training load**: each set counts reps × relative intensity (load ÷ best e1RM so far), scaled by RPE when logged.
+- **Banister model**: fitness (τ = 42 d) and fatigue (τ = 7 d); form = fitness − fatigue.
+- **ACWR**: 7-day vs 28-day load. 0.8–1.3 is the sweet spot; above 1.5 is high risk.
+- **Readiness**: form, sleep, stress, and resting HR / HRV relative to your baselines.
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+These are evidence-informed heuristics for planning, not medical advice.
 
-## Acknowledgements
+## Project layout
 
-- [Strong App](https://www.strong.app/) for the workout tracking application
-- [Streamlit](https://streamlit.io/) for the amazing web application framework
-- [Plotly](https://plotly.com/) for the interactive visualization library
-- All the fitness enthusiasts who provided feedback and feature suggestions
+```
+src/
+├── lib/                  # framework-free logic (unit tested)
+│   ├── strong.ts         # Strong CSV parser (; or , delimited, kg or lbs)
+│   ├── analysis.ts       # workouts, sessions, PRs, plateaus, patterns
+│   ├── muscles.ts        # exercise → muscle group mapping
+│   ├── one-rep-max.ts
+│   └── models/           # physiology, strength, volume, load
+├── state/store.tsx       # data + profile context, persisted to localStorage
+├── pages/                # one component per page
+└── components/
+    ├── charts/           # Bklit chart sources (installed via the shadcn registry)
+    ├── ui/               # shadcn/ui components
+    └── viz.tsx, common.tsx
+```
 
-## Screenshots
-
-### Dashboard Overview
-![Dashboard Overview](docs/images/dashboard_overview.png)
-
-### Exercise Analysis
-![Exercise Analysis](docs/images/exercise_analysis.png)
-
-### Muscle Groups
-![Muscle Groups](docs/images/muscle_groups.png)
-
-### Progress Tracking
-![Progress Tracking](docs/images/progress_tracking.png)
-
-## Future Development
-
-- Export functionality for reports and charts
-- Customizable muscle group mappings through the UI
-- Integration with other fitness apps and devices
-- Machine learning for workout recommendations
-- User accounts and cloud storage (optional)
-- Mobile app version
-
-## Need Help?
-
-If you encounter any issues or need help using GymViz, please open an issue on GitHub or contact us at support@gymviz.app.
+Add more Bklit charts with `pnpm dlx shadcn@latest add @bklit/<chart>`. The registry is already configured in
+`components.json`.
