@@ -11,10 +11,11 @@ import { acuteChronic, dailyLoads, fitnessFatigue, readiness } from "./models/lo
 import { DEFAULT_PROFILE, bodyweightAt, classify, dots, mainLiftOf } from "./models/physiology"
 import { detrainingFraction, forecastStrength, weeksToTarget } from "./models/strength"
 import { personalLandmarks, planVolume } from "./models/volume"
+import { detectUnit, planNextSession } from "./models/next-session"
 import { muscleGroupFor } from "./muscles"
 import { estimateOneRepMax } from "./one-rep-max"
 import { parseStrongCsv } from "./strong"
-import type { ExerciseSession } from "./types"
+import type { ExerciseSession, SetRow } from "./types"
 
 const csv = readFileSync(new URL("../../public/sample-strong.csv", import.meta.url), "utf8")
 const rows = parseStrongCsv(csv, bodyweightAt(DEFAULT_PROFILE))
@@ -178,5 +179,78 @@ describe("volume and load", () => {
     const r = readiness(ff.filter((p) => !p.projected).at(-1), DEFAULT_PROFILE)
     expect(r.score).toBeGreaterThanOrEqual(0)
     expect(r.score).toBeLessThanOrEqual(100)
+  })
+})
+
+describe("next session", () => {
+  const LB = 0.45359237
+  const bench = (day: number, sets: [number, number][]): SetRow[] =>
+    sets.map(([weight, reps], i) => ({
+      workoutId: String(day),
+      date: new Date(2024, 0, day, 18),
+      workoutName: "Push",
+      durationSec: 3600,
+      exercise: "Bench Press (Barbell)",
+      setOrder: i + 1,
+      isWarmup: false,
+      weight,
+      reps,
+      rpe: null,
+      distanceM: null,
+      seconds: null,
+      notes: "",
+      muscle: "Chest",
+      effectiveLoad: weight,
+      e1rm: estimateOneRepMax(weight, reps),
+      volume: weight * reps,
+    }))
+  const plan = (rows: SetRow[], asOf: Date) =>
+    planNextSession({
+      exercise: "Bench Press (Barbell)",
+      rows,
+      sessions: buildExerciseSessions(rows).get("Bench Press (Barbell)")!,
+      profile: DEFAULT_PROFILE,
+      asOf,
+    })!
+
+  it("detects pounds that Strong exported as kilograms", () => {
+    expect(detectUnit([135 * LB, 30 * LB, 0])).toBe("lb")
+    expect(detectUnit([49.5 * LB])).toBe("lb")
+    expect(detectUnit([60, 62.5, 20])).toBe("kg")
+  })
+
+  it("adds weight once every top set hits the usual reps", () => {
+    const rows = [...bench(1, [[60, 8], [60, 7], [60, 7]]), ...bench(4, [[60, 8], [60, 8], [60, 8]])]
+    const p = plan(rows, new Date(2024, 0, 5, 12))
+    expect(p.action).toBe("add-weight")
+    expect(p.target).toEqual({ weight: 62.5, reps: 8, sets: 3 })
+    expect(p.typicalGapDays).toBe(3)
+  })
+
+  it("adds a rep when the last session fell short", () => {
+    const rows = [...bench(1, [[60, 8], [60, 8]]), ...bench(4, [[62.5, 8], [62.5, 6]])]
+    const p = plan(rows, new Date(2024, 0, 5, 12))
+    expect(p.action).toBe("add-reps")
+    expect(p.target).toEqual({ weight: 62.5, reps: 7, sets: 2 })
+  })
+
+  it("waits for the muscle to recover and follows your usual gap", () => {
+    const rows = [...bench(1, [[60, 8]]), ...bench(4, [[60, 8]])]
+    expect(plan(rows, new Date(2024, 0, 5, 12)).status).toBe("upcoming")
+    expect(plan(rows, new Date(2024, 0, 7, 20)).status).toBe("due")
+    expect(plan(rows, new Date(2024, 0, 12, 20)).status).toBe("overdue")
+  })
+
+  it("flags recovery only when it delays a session that is due", () => {
+    // Daily bench: due the next day, but chest needs ~52 h.
+    const rows = [...bench(1, [[60, 8]]), ...bench(2, [[60, 8]]), ...bench(3, [[60, 8]])]
+    expect(plan(rows, new Date(2024, 0, 4, 12)).status).toBe("recovering")
+  })
+
+  it("eases back in after a layoff", () => {
+    const rows = [...bench(1, [[100, 5]]), ...bench(4, [[100, 5]])]
+    const p = plan(rows, new Date(2024, 1, 20))
+    expect(p.action).toBe("ease-back")
+    expect(p.target.weight).toBeLessThan(100)
   })
 })

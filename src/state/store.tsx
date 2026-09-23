@@ -33,6 +33,19 @@ function save(key: string, value: unknown) {
   }
 }
 
+/** useState that survives reloads, for per-page UI choices (selected exercise, goals…). */
+export function usePersistentState<T>(key: string, fallback: T): [T, (v: T) => void] {
+  const [value, setValue] = useState<T>(() => load(key, fallback))
+  const set = useCallback(
+    (v: T) => {
+      setValue(v)
+      save(key, v)
+    },
+    [key],
+  )
+  return [value, set]
+}
+
 export interface Dataset {
   /** Every parsed set (unfiltered) — models use full history. */
   allRows: SetRow[]

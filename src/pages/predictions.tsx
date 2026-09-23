@@ -1,4 +1,4 @@
-import { AlertTriangle, BatteryCharging, Info, RotateCcw, Target } from "lucide-react"
+import { AlertTriangle, BatteryCharging, CalendarClock, Info, RotateCcw, Target, Trophy } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Gauge } from "@/components/charts/gauge"
 import { ReferenceArea } from "@/components/charts/reference-area"
@@ -17,8 +17,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ChartCard, EmptyChart, SERIES, type Series, TimeLineChart } from "@/components/viz"
 import { exerciseUsage, weeklyMuscleSets, weeklySeries, buildWorkouts } from "@/lib/analysis"
-import { addDays, formatDate } from "@/lib/dates"
+import { addDays, daysBetween, formatDate } from "@/lib/dates"
 import { fmt1, fmtInt, fmtKg, fmtTonnes } from "@/lib/format"
+import { type NextAction, type NextSession, type NextStatus, formatLoad, planNextSession } from "@/lib/models/next-session"
 import { type LoadScenario, acuteChronic, acwrZone, dailyLoads, fitnessFatigue, readiness } from "@/lib/models/load"
 import {
   LEVELS,
@@ -32,10 +33,10 @@ import {
 } from "@/lib/models/physiology"
 import { type StrengthForecast, dateAfterWeeks, forecastStrength, weeksToTarget } from "@/lib/models/strength"
 import { VOLUME_GROUPS, personalLandmarks, planVolume, projectTonnage } from "@/lib/models/volume"
-import { muscleGroupFor } from "@/lib/muscles"
+import { isAssisted, muscleGroupFor } from "@/lib/muscles"
 import { loadForReps } from "@/lib/one-rep-max"
 import type { MuscleGroup, NutritionState } from "@/lib/types"
-import { type Dataset, useData, useStore } from "@/state/store"
+import { type Dataset, useData, usePersistentState, useStore } from "@/state/store"
 
 const HORIZONS = [4, 8, 12, 26] as const
 const DAY = 86_400_000
@@ -77,6 +78,9 @@ export function PredictionsPage() {
   const data = useData()
   const [layoff, setLayoff] = useState(false)
   const ctx = useModelContext(data, layoff)
+  const [tab, setTab] = usePersistentState("gymviz.predictions.tab", "next")
+  // Shared by the Next session and Strength tabs so switching keeps your exercise.
+  const [exercise, setExercise] = usePersistentState<string | null>("gymviz.predictions.exercise", null)
 
   return (
     <>
@@ -97,15 +101,19 @@ export function PredictionsPage() {
           </AlertDescription>
         </Alert>
       ) : null}
-      <Tabs defaultValue="strength">
+      <Tabs onValueChange={setTab} value={tab}>
         <TabsList className="mb-2 h-auto flex-wrap justify-start">
+          <TabsTrigger value="next">Next session</TabsTrigger>
           <TabsTrigger value="strength">Strength</TabsTrigger>
           <TabsTrigger value="volume">Volume</TabsTrigger>
           <TabsTrigger value="fatigue">Fatigue & readiness</TabsTrigger>
           <TabsTrigger value="standards">Standards</TabsTrigger>
         </TabsList>
+        <TabsContent value="next">
+          <NextSessionTab ctx={ctx} data={data} onPick={setExercise} picked={exercise} />
+        </TabsContent>
         <TabsContent value="strength">
-          <StrengthTab ctx={ctx} data={data} />
+          <StrengthTab ctx={ctx} data={data} onPick={setExercise} picked={exercise} />
         </TabsContent>
         <TabsContent value="volume">
           <VolumeTab ctx={ctx} data={data} />
@@ -118,6 +126,207 @@ export function PredictionsPage() {
         </TabsContent>
       </Tabs>
     </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Next session
+// ---------------------------------------------------------------------------
+
+const STATUS: Record<NextStatus, { label: string; variant: "default" | "secondary" | "outline" | "destructive" }> = {
+  overdue: { label: "Overdue", variant: "destructive" },
+  due: { label: "Due", variant: "default" },
+  recovering: { label: "Recovering", variant: "secondary" },
+  upcoming: { label: "Upcoming", variant: "outline" },
+}
+const STATUS_ORDER: NextStatus[] = ["overdue", "due", "recovering", "upcoming"]
+
+const ACTION: Record<NextAction, string> = {
+  "add-weight": "Add weight",
+  "add-reps": "Add a rep",
+  repeat: "Repeat",
+  reset: "Reset",
+  "ease-back": "Ease back in",
+}
+
+function loadLabel(p: NextSession, weight: number) {
+  if (isAssisted(p.exercise)) return `${formatLoad(weight, p.unit)} assist`
+  return weight > 0 ? formatLoad(weight, p.unit) : "Bodyweight"
+}
+
+/** "60 kg × 8, 8, 7 · 65 kg × 5" */
+function setsLabel(p: NextSession) {
+  const groups: { weight: number; reps: number[] }[] = []
+  for (const s of p.lastSets) {
+    const g = groups.at(-1)
+    if (g && g.weight === s.weight) g.reps.push(s.reps)
+    else groups.push({ weight: s.weight, reps: [s.reps] })
+  }
+  return groups.map((g) => `${loadLabel(p, g.weight)} × ${g.reps.join(", ")}`).join(" · ")
+}
+
+function relativeDay(from: Date, to: Date) {
+  const n = daysBetween(from, to)
+  if (n === 0) return "today"
+  if (n === 1) return "tomorrow"
+  return n > 0 ? `in ${n} days` : `${-n} days ago`
+}
+
+function NextSessionTab({ data, ctx, picked, onPick }: { data: Dataset; ctx: ModelContext; picked: string | null; onPick: (e: string) => void }) {
+  const plans = useMemo(() => {
+    const lastLogged = data.allRows.at(-1)!.date
+    const rows = data.allRows.filter((r) => r.date <= ctx.asOf)
+    const out: NextSession[] = []
+    for (const [exercise, all] of data.allSessions) {
+      const sessions = all.filter((s) => s.date <= ctx.asOf)
+      const last = sessions.at(-1)
+      // Only exercises that are part of your current routine.
+      if (!last || daysBetween(last.date, lastLogged) > 56) continue
+      const forecast = forecastFor(data, ctx, exercise, 4)
+      const plan = planNextSession({ exercise, rows, sessions, profile: ctx.profile, asOf: ctx.asOf, forecast })
+      if (plan) out.push(plan)
+    }
+    return out.sort(
+      (a, b) =>
+        a.suggestedDate.getTime() - b.suggestedDate.getTime() ||
+        STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status) ||
+        a.dueOn.getTime() - b.dueOn.getTime(),
+    )
+  }, [data, ctx])
+
+  if (!plans.length) {
+    return <EmptyChart>No strength exercises in the 8 weeks before your last workout</EmptyChart>
+  }
+  const plan = plans.find((p) => p.exercise === picked) ?? plans[0]
+  const counts = STATUS_ORDER.map((st) => ({ st, n: plans.filter((p) => p.status === st).length }))
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {counts.map(({ st, n }) => (
+          <StatCard
+            hint={
+              st === "overdue"
+                ? "Well past your usual gap"
+                : st === "due"
+                  ? "Your usual day is now"
+                  : st === "recovering"
+                    ? "Due, but the muscle needs rest"
+                    : "Not due yet"
+            }
+            key={st}
+            label={STATUS[st].label}
+            value={n}
+          />
+        ))}
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-5">
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="flex flex-wrap items-center gap-2">
+              {plan.exercise}
+              <Badge variant={STATUS[plan.status].variant}>{STATUS[plan.status].label}</Badge>
+            </CardTitle>
+            <CardDescription>
+              Last time ({formatDate(plan.lastDate)}): {setsLabel(plan)}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-5">
+            <div className="grid gap-1">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Next session target</span>
+                <Badge variant="outline">{ACTION[plan.action]}</Badge>
+              </div>
+              <div className="text-3xl font-semibold tracking-tight tabular-nums">
+                {loadLabel(plan, plan.target.weight)} × {plan.target.reps}
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                <span>
+                  {plan.target.sets} top set{plan.target.sets > 1 ? "s" : ""}
+                  {plan.targetE1rm > 0 ? ` · est. 1RM ${formatLoad(plan.targetE1rm, plan.unit)}` : ""}
+                </span>
+                {plan.isPr ? (
+                  <Badge variant="secondary">
+                    <Trophy /> PR if you hit it
+                  </Badge>
+                ) : null}
+              </div>
+              <p className="mt-1 text-sm">{plan.reason}</p>
+            </div>
+
+            <div className="grid gap-2 text-sm">
+              <div className="flex items-center gap-2 font-medium">
+                <CalendarClock className="size-4" /> Train it {relativeDay(ctx.asOf, plan.suggestedDate)} · {formatDate(plan.suggestedDate)}
+              </div>
+              <ul className="grid gap-1 text-muted-foreground">
+                <li>
+                  {plan.muscle} recovered from {formatDate(plan.readyFrom)} ({plan.restHours} h rest after your last {plan.muscle.toLowerCase()} work)
+                </li>
+                <li>
+                  You usually do it every {plan.typicalGapDays} day{plan.typicalGapDays > 1 ? "s" : ""} → {formatDate(plan.dueOn)}
+                </li>
+              </ul>
+            </div>
+
+            {plan.alternatives ? (
+              <div className="grid gap-1">
+                <div className="text-xs text-muted-foreground">Same effort, other rep counts</div>
+                <div className="grid grid-cols-5 gap-1 text-center text-sm">
+                  {plan.alternatives.map((a) => (
+                    <div className="rounded-md bg-muted/50 py-1.5" key={a.reps}>
+                      <div className="text-xs text-muted-foreground">{a.reps} reps</div>
+                      <div className="tabular-nums">{formatLoad(a.weight, plan.unit)}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+
+        <ChartCard className="lg:col-span-3" description="Everything from your current routine, ordered by when to train it. Pick one to see the details." title="Up next">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Exercise</TableHead>
+                <TableHead>When</TableHead>
+                <TableHead className="text-right">Target</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {plans.map((p) => (
+                <TableRow data-state={p.exercise === plan.exercise ? "selected" : undefined} key={p.exercise}>
+                  <TableCell>
+                    <button className="flex items-center gap-2 text-left hover:underline" onClick={() => onPick(p.exercise)} type="button">
+                      <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: MUSCLE_COLOR[p.muscle] }} />
+                      {p.exercise}
+                    </button>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={STATUS[p.status].variant}>{STATUS[p.status].label}</Badge>
+                      <span className="text-muted-foreground">{relativeDay(ctx.asOf, p.suggestedDate)}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {p.target.sets} × {p.target.reps} @ {loadLabel(p, p.target.weight)}
+                    {p.isPr ? <Trophy aria-label="PR" className="ml-1 inline size-3.5 text-muted-foreground" /> : null}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </ChartCard>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        Targets use double progression on your top sets: hit your usual reps on every set → add the smallest plate step (5 lb if you log
+        in pounds, else 2.5 kg or 2 kg for dumbbells); otherwise add a rep. The strength forecast holds back jumps it thinks are too big,
+        5+ stalled sessions while missing reps suggests a 10% reset, and layoffs over 3 weeks start you lighter. Timing is the later of your usual gap for the exercise and ~48 h (72 h for legs
+        and deadlifts) of muscle recovery, lengthened by short sleep, high stress and age.
+      </p>
+    </div>
   )
 }
 
@@ -153,7 +362,7 @@ function forecastRows(f: StrengthForecast, baseline: StrengthForecast | null) {
   return rows
 }
 
-function StrengthTab({ data, ctx }: { data: Dataset; ctx: ModelContext }) {
+function StrengthTab({ data, ctx, picked, onPick }: { data: Dataset; ctx: ModelContext; picked: string | null; onPick: (e: string) => void }) {
   const { profile } = ctx
   const candidates = useMemo(
     () =>
@@ -163,9 +372,8 @@ function StrengthTab({ data, ctx }: { data: Dataset; ctx: ModelContext }) {
     [data.allSessions],
   )
   const defaultExercise = candidates.find((c) => mainLiftOf(c.exercise))?.exercise ?? candidates[0]?.exercise ?? ""
-  const [picked, setPicked] = useState<string | null>(null)
-  const exercise = picked && data.allSessions.has(picked) ? picked : defaultExercise
-  const [horizon, setHorizon] = useState<number>(12)
+  const exercise = picked && candidates.some((c) => c.exercise === picked) ? picked : defaultExercise
+  const [horizon, setHorizon] = usePersistentState<number>("gymviz.predictions.horizon", 12)
   const baseScenario: RecoveryInputs = {
     sleepHours: profile.sleepHours,
     stress: profile.stress,
@@ -175,7 +383,9 @@ function StrengthTab({ data, ctx }: { data: Dataset; ctx: ModelContext }) {
   }
   const [scenario, setScenario] = useState<RecoveryInputs>(baseScenario)
   const scenarioChanged = (Object.keys(baseScenario) as (keyof RecoveryInputs)[]).some((k) => baseScenario[k] !== scenario[k])
-  const [target, setTarget] = useState("")
+  const [goals, setGoals] = usePersistentState<Record<string, string>>("gymviz.predictions.goals", {})
+  const target = goals[exercise] ?? ""
+  const setTarget = (v: string) => setGoals({ ...goals, [exercise]: v })
 
   const forecast = useMemo(
     () => (exercise ? forecastFor(data, ctx, exercise, horizon, scenario) : null),
@@ -209,7 +419,7 @@ function StrengthTab({ data, ctx }: { data: Dataset; ctx: ModelContext }) {
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <ExerciseSelect exercises={candidates} onChange={setPicked} value={exercise} />
+        <ExerciseSelect exercises={candidates} onChange={onPick} value={exercise} />
         <ToggleGroup onValueChange={(v) => v && setHorizon(Number(v))} type="single" value={String(horizon)} variant="outline">
           {HORIZONS.map((h) => (
             <ToggleGroupItem aria-label={`${h} weeks`} key={h} value={String(h)}>
