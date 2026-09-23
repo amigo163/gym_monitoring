@@ -53,6 +53,9 @@ describe("muscle mapping", () => {
     ["Bicep Curl (Dumbbell)", "Arms"],
     ["Toes To Bar", "Core"],
     ["Running (Treadmill)", "Cardio"],
+    ["Lateral Glute Kickback (Cable)", "Legs"],
+    ["Knee Raise (Captain's Chair)", "Core"],
+    ["Torso Rotation (Cable)", "Core"],
   ])("%s → %s", (name, group) => {
     expect(muscleGroupFor(name)).toBe(group)
   })

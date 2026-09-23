@@ -40,7 +40,7 @@ export function ExercisesPage() {
 
   const metricInfo = METRICS.find((m) => m.value === metric)!
   const hasE1rm = list.some((s) => s.bestE1rm > 0)
-  const chartData = list.map((s) => ({ date: s.date, value: s[metric] }))
+  const chartData = useMemo(() => list.map((s) => ({ date: s.date, value: s[metric] })), [list, metric])
 
   return (
     <>

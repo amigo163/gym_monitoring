@@ -101,6 +101,7 @@ export function TimeLineChart({
   height = 260,
   children,
   xKey = "date",
+  includeY,
 }: {
   data: Record<string, unknown>[]
   series: Series[]
@@ -108,12 +109,20 @@ export function TimeLineChart({
   height?: number
   children?: ReactNode
   xKey?: string
+  /** Values the y-axis must reach, e.g. the top of a reference band. */
+  includeY?: number[]
 }) {
   if (data.length < 2) return <EmptyChart>Not enough data for a trend yet</EmptyChart>
+  let yDomainMax: number | undefined
+  if (includeY?.length) {
+    const values = data.flatMap((d) => series.map((s) => d[s.key])).filter((v): v is number => typeof v === "number")
+    // Only for non-negative series: a fixed max implies a zero baseline.
+    if (!values.some((v) => v < 0)) yDomainMax = Math.max(...values, ...includeY)
+  }
   return (
     <div>
       <SeriesLegend series={series} />
-      <LineChart aspectRatio="" data={data} margin={{ left: 44 }} style={{ height }} xDataKey={xKey}>
+      <LineChart aspectRatio="" data={data} margin={{ left: 44 }} style={{ height }} xDataKey={xKey} yDomainMax={yDomainMax}>
         <Grid horizontal />
         {children}
         {series.map((s) => (

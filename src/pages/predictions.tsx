@@ -511,6 +511,7 @@ function VolumeTab({ data, ctx }: { data: Dataset; ctx: ModelContext }) {
         <TimeLineChart
           data={rows}
           format={fmt1}
+          includeY={lm ? [lm.mrv] : undefined}
           series={[{ key: "sets", label: "Sets", color: MUSCLE_COLOR[muscle], dashFromIndex: Math.max(0, hist.length - 1) }]}
         >
           {lm ? (

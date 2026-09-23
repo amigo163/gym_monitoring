@@ -20,10 +20,10 @@ export const TRAINABLE_GROUPS: MuscleGroup[] = ["Chest", "Back", "Legs", "Should
 const PATTERNS: [MuscleGroup, RegExp[]][] = [
   ["Chest", [/bench\s*press/, /push\s*up/, /chest\s*press/, /chest\s*fly/, /incline\s*press/, /decline\s*press/, /\bdip/, /svend\s*press/, /pec\s*deck/, /cable\s*cross/]],
   ["Back", [/deadlift/, /\brow\b/, /pull[\s-]*up/, /lat\s*pull/, /chin[\s-]*up/, /pulldown/, /back\s*extension/, /good\s*morning/, /hyper\s*extension/, /pull\s*over/, /shrug/, /face\s*pull/, /t\s*bar/]],
-  ["Legs", [/squat/, /lunge/, /leg\s*press/, /leg\s*extension/, /leg\s*curl/, /calf\s*raise/, /hip\s*thrust/, /glute\s*bridge/, /bulgarian\s*split/, /step\s*up/, /box\s*jump/, /pistol/, /wall\s*sit/, /hip\s*a[bd]duct/]],
+  ["Legs", [/squat/, /lunge/, /glute/, /leg\s*press/, /leg\s*extension/, /leg\s*curl/, /calf\s*raise/, /hip\s*thrust/, /bulgarian\s*split/, /step\s*up/, /box\s*jump/, /pistol/, /wall\s*sit/, /hip\s*a[bd]duct/]],
   ["Shoulders", [/shoulder\s*press/, /overhead\s*press/, /military\s*press/, /\bohp\b/, /lateral\s*raise/, /front\s*raise/, /rear\s*delt/, /upright\s*row/, /arnold\s*press/, /reverse\s*fly/, /backward\s*raise/]],
   ["Arms", [/curl/, /tricep/, /extension/, /pushdown/, /skull\s*crusher/, /close\s*grip/, /kickback/]],
-  ["Core", [/crunch/, /sit[\s-]*up/, /plank/, /\bab\b/, /russian\s*twist/, /leg\s*raise/, /mountain\s*climber/, /hollow\s*hold/, /v[\s-]*up/, /bicycle/, /hanging\s*leg/, /rollout/, /dragon\s*flag/, /toes\s*to\s*bar/]],
+  ["Core", [/crunch/, /sit[\s-]*up/, /plank/, /\bab\b/, /russian\s*twist/, /leg\s*raise/, /mountain\s*climber/, /hollow\s*hold/, /v[\s-]*up/, /bicycle/, /hanging\s*leg/, /knee\s*raise/, /torso\s*rotation/, /leg\s*throw/, /rollout/, /dragon\s*flag/, /toes\s*to\s*bar/]],
   ["Cardio", [/\brun/, /cardio/, /elliptical/, /\bbike/, /cycling/, /treadmill/, /rowing/, /jump\s*rope/, /burpee/, /jumping\s*jack/, /sprint/, /hiit/, /interval/, /stairmaster/, /walk/]],
   ["Olympic", [/clean/, /jerk/, /snatch/, /push\s*press/]],
 ]

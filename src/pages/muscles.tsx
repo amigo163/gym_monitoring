@@ -128,7 +128,12 @@ export function MusclesPage() {
         title={`Weekly sets · ${muscle}`}
       >
         {muscleWeekly.length >= 2 ? (
-          <TimeLineChart data={muscleWeekly} format={fmt1} series={[{ key: "sets", label: "Sets", color: MUSCLE_COLOR[muscle] }]}>
+          <TimeLineChart
+            data={muscleWeekly}
+            format={fmt1}
+            includeY={lm ? [lm.mrv] : undefined}
+            series={[{ key: "sets", label: "Sets", color: MUSCLE_COLOR[muscle] }]}
+          >
             {lm ? (
               <>
                 <ReferenceArea fill="var(--status-good)" fillOpacity={0.1} y1={lm.mev} y2={lm.mavHigh} />

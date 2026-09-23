@@ -72,24 +72,32 @@ export function useAnimatedSeriesPath({
 
   const prevTransitionSignatureRef = useRef(transitionSignature);
 
+  // Latest geometry for the running tween. The y-domain tweens alongside a data
+  // change, so scales change every frame; reading them through refs keeps the
+  // morph running instead of restarting (and stalling) it on each frame.
+  const geometryRef = useRef({ renderData, xAccessor, xScale, yScale, dataKey });
+  geometryRef.current = { renderData, xAccessor, xScale, yScale, dataKey };
+  const targetPointsRef = useRef(targetPoints);
+  targetPointsRef.current = targetPoints;
+
   useEffect(() => {
     if (!animatingRef.current) {
       displayedPointsRef.current = targetPoints;
     }
   }, [targetPoints]);
 
-  useEffect(() => {
-    const shouldAnimate =
-      enabled &&
-      !reducedMotion &&
-      chartPhase === "ready" &&
-      durationMs > 0 &&
-      renderData.length > 0;
+  const shouldAnimate =
+    enabled &&
+    !reducedMotion &&
+    chartPhase === "ready" &&
+    durationMs > 0 &&
+    renderData.length > 0;
 
+  useEffect(() => {
     if (!shouldAnimate) {
       animatingRef.current = false;
       setAnimatedPoints(null);
-      displayedPointsRef.current = targetPoints;
+      displayedPointsRef.current = targetPointsRef.current;
       prevTransitionSignatureRef.current = transitionSignature;
       return;
     }
@@ -99,9 +107,10 @@ export function useAnimatedSeriesPath({
     }
     prevTransitionSignatureRef.current = transitionSignature;
 
-    const fromPoints = displayedPointsRef.current ?? targetPoints;
+    const fromPoints = displayedPointsRef.current ?? targetPointsRef.current;
     if (fromPoints.length === 0) {
-      displayedPointsRef.current = targetPoints;
+      displayedPointsRef.current = targetPointsRef.current;
+      setAnimatedPoints(null);
       return;
     }
 
@@ -112,12 +121,13 @@ export function useAnimatedSeriesPath({
       duration: durationMs / 1000,
       ease: [...LINE_LOADING_PULSE_EASE],
       onUpdate: (progress) => {
+        const g = geometryRef.current;
         const currentTarget = computeSeriesPathPoints(
-          renderData,
-          xAccessor,
-          xScale,
-          yScale,
-          dataKey
+          g.renderData,
+          g.xAccessor,
+          g.xScale,
+          g.yScale,
+          g.dataKey
         );
         const next = interpolateSeriesPathPoints(
           fromSnapshot,
@@ -129,7 +139,7 @@ export function useAnimatedSeriesPath({
       },
       onComplete: () => {
         animatingRef.current = false;
-        displayedPointsRef.current = targetPoints;
+        displayedPointsRef.current = targetPointsRef.current;
         setAnimatedPoints(null);
       },
     });
@@ -138,19 +148,7 @@ export function useAnimatedSeriesPath({
       control.stop();
       animatingRef.current = false;
     };
-  }, [
-    transitionSignature,
-    chartPhase,
-    durationMs,
-    enabled,
-    reducedMotion,
-    renderData,
-    xAccessor,
-    xScale,
-    yScale,
-    dataKey,
-    targetPoints,
-  ]);
+  }, [transitionSignature, shouldAnimate, durationMs]);
 
   const activePoints = animatedPoints ?? targetPoints;
   const pathD = useMemo(
