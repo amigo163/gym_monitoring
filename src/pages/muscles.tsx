@@ -36,20 +36,26 @@ export function MusclesPage() {
   const trainingYears =
     profile.priorTrainingYears + (allRows.at(-1)!.date.getTime() - allRows[0].date.getTime()) / (365.25 * 86_400_000)
 
-  // Balance radar: share of sets, whole range vs. last 4 weeks, scaled so the top group = 100.
+  // Balance radar: weekly hard sets as a share of each group's own productive target
+  // (legs need more sets than shoulders to be "trained enough"), scaled so the top group = 100.
+  // A round shape means every group gets the same fraction of what it needs.
   const radar = useMemo(() => {
-    const recentCut = new Date(rows.at(-1)!.date.getTime() - 28 * 86_400_000)
-    const shares = (subset: typeof rows) => {
-      const counts = Object.fromEntries(TRAINABLE_GROUPS.map((g) => [g, 0])) as Record<string, number>
-      for (const r of workingSets(subset)) if (r.muscle in counts) counts[r.muscle] += 1
-      const max = Math.max(...Object.values(counts), 1)
-      return Object.fromEntries(Object.entries(counts).map(([k, v]) => [k, (v / max) * 100]))
+    const shares = (weeks: typeof weekly) => {
+      const ratios = Object.fromEntries(
+        TRAINABLE_GROUPS.map((g) => {
+          const l = personalLandmarks(g, profile, trainingYears)
+          const perWeek = weeks.length ? weeks.reduce((a, w) => a + (w[g] ?? 0), 0) / weeks.length : 0
+          return [g, l ? perWeek / ((l.mavLow + l.mavHigh) / 2) : 0]
+        }),
+      )
+      const max = Math.max(...Object.values(ratios), 1e-9)
+      return Object.fromEntries(Object.entries(ratios).map(([k, v]) => [k, (v / max) * 100]))
     }
     return [
-      { label: "Selected range", color: SERIES[0], values: shares(rows) },
-      { label: "Last 4 weeks", color: SERIES[1], values: shares(rows.filter((r) => r.date >= recentCut)) },
+      { label: "Selected range", color: SERIES[0], values: shares(weekly) },
+      { label: "Last 4 weeks", color: SERIES[1], values: shares(weekly.slice(-4)) },
     ]
-  }, [rows])
+  }, [weekly, profile, trainingYears])
 
   const monthly = useMemo(() => {
     const map = new Map<number, Record<string, unknown>>()
@@ -79,7 +85,7 @@ export function MusclesPage() {
         title="Muscle groups"
       />
       <div className="grid gap-4 lg:grid-cols-5">
-        <ChartCard className="lg:col-span-2" description="Relative share of working sets (top group = 100)" title="Balance">
+        <ChartCard className="lg:col-span-2" description="Weekly sets relative to each group's productive target (top group = 100). Round = balanced." title="Balance">
           <SeriesLegend series={radar.map((r, i) => ({ key: String(i), label: r.label, color: r.color }))} />
           <div className="flex justify-center">
             <RadarChart
@@ -122,11 +128,20 @@ export function MusclesPage() {
         className="mt-4"
         description={
           lm
-            ? `Hard sets per week. Green band = productive range (${lm.mev}–${lm.mavHigh}); red = above your recoverable volume (${lm.mrv}+), personalised from your recovery inputs.`
+            ? "Hard sets per week against your volume landmarks, personalised from your recovery inputs and training age."
             : "Hard sets per week"
         }
         title={`Weekly sets · ${muscle}`}
       >
+        {lm && muscleWeekly.length >= 2 ? (
+          <SeriesLegend
+            bands={[
+              { label: `Productive (${lm.mev}–${lm.mavHigh})`, color: "var(--status-good)" },
+              { label: `Above recoverable (${lm.mrv}+)`, color: "var(--status-critical)" },
+            ]}
+            series={[{ key: "sets", label: "Hard sets", color: MUSCLE_COLOR[muscle] }]}
+          />
+        ) : null}
         {muscleWeekly.length >= 2 ? (
           <TimeLineChart
             data={muscleWeekly}

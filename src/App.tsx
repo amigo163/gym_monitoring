@@ -16,6 +16,7 @@ const PAGES: Record<PageId, ComponentType> = {
   records: page(() => import("@/pages/records"), "RecordsPage"),
   predictions: page(() => import("@/pages/predictions"), "PredictionsPage"),
   profile: page(() => import("@/pages/profile"), "ProfilePage"),
+  library: page(() => import("@/pages/library"), "LibraryPage"),
 }
 
 function PageFallback() {

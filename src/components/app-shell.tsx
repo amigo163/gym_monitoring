@@ -4,6 +4,7 @@ import {
   CalendarClock,
   Dumbbell,
   LayoutDashboard,
+  Library,
   type LucideIcon,
   Moon,
   PersonStanding,
@@ -39,7 +40,7 @@ import { describeImport } from "@/lib/db"
 import type { WeightUnit } from "@/lib/format"
 import { useStore } from "@/state/store"
 
-export type PageId = "overview" | "exercises" | "muscles" | "patterns" | "records" | "predictions" | "profile"
+export type PageId = "overview" | "exercises" | "muscles" | "patterns" | "records" | "predictions" | "profile" | "library"
 
 interface NavItem {
   id: PageId
@@ -60,8 +61,10 @@ const MODELLING: NavItem[] = [
   { id: "profile", label: "Body & health", icon: UserRound },
 ]
 
+const RESOURCES: NavItem[] = [{ id: "library", label: "Library", icon: Library }]
+
 export const PAGE_TITLES: Record<PageId, string> = Object.fromEntries(
-  [...ANALYTICS, ...MODELLING].map((i) => [i.id, i.label]),
+  [...ANALYTICS, ...MODELLING, ...RESOURCES].map((i) => [i.id, i.label]),
 ) as Record<PageId, string>
 
 function readHash(): PageId {
@@ -136,7 +139,7 @@ const RANGES: { value: DateRangeKey; label: string }[] = [
 export function AppShell({ page, onNavigate, children }: { page: PageId; onNavigate: (p: PageId) => void; children: ReactNode }) {
   const { data, error, lastImport, range, setRange, unit, setUnit, clearData } = useStore()
   const theme = useTheme()
-  const rangeMatters = page !== "predictions" && page !== "profile"
+  const rangeMatters = page !== "predictions" && page !== "profile" && page !== "library"
 
   return (
     <SidebarProvider>
@@ -155,6 +158,7 @@ export function AppShell({ page, onNavigate, children }: { page: PageId; onNavig
         <SidebarContent>
           <NavGroup items={ANALYTICS} label="Analytics" onNavigate={onNavigate} page={page} />
           <NavGroup items={MODELLING} label="Modelling" onNavigate={onNavigate} page={page} />
+          <NavGroup items={RESOURCES} label="Resources" onNavigate={onNavigate} page={page} />
         </SidebarContent>
         <SidebarFooter>
           {data ? (

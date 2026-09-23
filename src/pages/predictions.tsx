@@ -1,4 +1,4 @@
-import { AlertTriangle, BatteryCharging, CalendarClock, Info, RotateCcw, Target, Trophy } from "lucide-react"
+import { AlertTriangle, BatteryCharging, CalendarClock, ChevronRight, Info, RotateCcw, Target, Trophy } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Gauge } from "@/components/charts/gauge"
 import { ReferenceArea } from "@/components/charts/reference-area"
@@ -33,9 +33,9 @@ import {
 } from "@/lib/models/physiology"
 import {
   type ForecastMetric,
+  HALF_LIFE_WEEKS,
   type StrengthForecast,
   dateAfterWeeks,
-  forecastMetricFor,
   forecastStrength,
   forecastableSessions,
   weeksToTarget,
@@ -105,8 +105,12 @@ export function PredictionsPage() {
   const [layoff, setLayoff] = useState(false)
   const ctx = useModelContext(data, layoff)
   const [tab, setTab] = usePersistentState("gymviz.predictions.tab", "next")
-  // Shared by the Next session and Strength tabs so switching keeps your exercise.
+  // Shared by the Next session, Strength and Goals tabs so switching keeps your exercise.
   const [exercise, setExercise] = usePersistentState<string | null>("gymviz.predictions.exercise", null)
+  const editGoal = (e: string) => {
+    setExercise(e)
+    setTab("goals")
+  }
 
   return (
     <>
@@ -131,15 +135,19 @@ export function PredictionsPage() {
         <TabsList className="mb-2 h-auto flex-wrap justify-start">
           <TabsTrigger value="next">Next session</TabsTrigger>
           <TabsTrigger value="strength">Strength</TabsTrigger>
+          <TabsTrigger value="goals">Goals</TabsTrigger>
           <TabsTrigger value="volume">Volume</TabsTrigger>
           <TabsTrigger value="fatigue">Fatigue & readiness</TabsTrigger>
           <TabsTrigger value="standards">Standards</TabsTrigger>
         </TabsList>
         <TabsContent value="next">
-          <NextSessionTab ctx={ctx} data={data} onPick={setExercise} picked={exercise} />
+          <NextSessionTab ctx={ctx} data={data} onEditGoal={editGoal} onPick={setExercise} picked={exercise} />
         </TabsContent>
         <TabsContent value="strength">
-          <StrengthTab ctx={ctx} data={data} onPick={setExercise} picked={exercise} />
+          <StrengthTab ctx={ctx} data={data} onEditGoal={editGoal} onPick={setExercise} picked={exercise} />
+        </TabsContent>
+        <TabsContent value="goals">
+          <GoalsTab ctx={ctx} data={data} onPick={setExercise} picked={exercise} />
         </TabsContent>
         <TabsContent value="volume">
           <VolumeTab ctx={ctx} data={data} />
@@ -215,13 +223,49 @@ function relativeDay(from: Date, to: Date) {
   return n > 0 ? `in ${n} days` : `${-n} days ago`
 }
 
-function NextSessionTab({ data, ctx, picked, onPick }: { data: Dataset; ctx: ModelContext; picked: string | null; onPick: (e: string) => void }) {
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+
+/** "est. 1RM 100 kg · 5–8 reps", or where the plan's reps come from without a goal. */
+function goalSummary(p: NextSession) {
+  const reps =
+    p.kind === "time"
+      ? null
+      : p.repRangeFromGoal
+        ? `${p.repRange.min === p.repRange.max ? p.repRange.min : `${p.repRange.min}–${p.repRange.max}`} reps`
+        : `usual ${p.repRange.min} reps`
+  const target = p.goal ? `Goal ${PLAN_METRIC_LABEL[p.kind]} ${planValue(p, p.goal.target)}` : null
+  return [target ?? "No goal", reps].filter(Boolean).join(" · ")
+}
+
+/** Collapsed-by-default section for the secondary parts of a card. */
+function Disclosure({ title, summary, children }: { title: string; summary?: string; children: React.ReactNode }) {
+  return (
+    <details className="group border-b last:border-b-0">
+      <summary className="flex cursor-pointer list-none items-center gap-2 py-3 [&::-webkit-details-marker]:hidden">
+        <ChevronRight className="size-4 text-muted-foreground transition-transform group-open:rotate-90" />
+        <span className="font-medium">{title}</span>
+        {summary ? <span className="ml-auto truncate text-xs text-muted-foreground">{summary}</span> : null}
+      </summary>
+      <div className="pb-4">{children}</div>
+    </details>
+  )
+}
+
+interface TabProps {
+  data: Dataset
+  ctx: ModelContext
+  picked: string | null
+  onPick: (e: string) => void
+  /** Open the Goals tab on this exercise. */
+  onEditGoal: (e: string) => void
+}
+
+function NextSessionTab({ data, ctx, picked, onPick, onEditGoal }: TabProps) {
   const { goals, unit } = useStore()
-  const { plans, current } = useMemo(() => {
+  const plans = useMemo(() => {
     const lastLogged = data.allRows.at(-1)!.date
     const rows = data.allRows.filter((r) => r.date <= ctx.asOf)
     const out: NextSession[] = []
-    const current = new Map<string, number>()
     for (const [exercise, all] of data.allSessions) {
       const sessions = all.filter((s) => s.date <= ctx.asOf)
       const last = sessions.at(-1)
@@ -229,9 +273,7 @@ function NextSessionTab({ data, ctx, picked, onPick }: { data: Dataset; ctx: Mod
       if (!last || daysBetween(last.date, lastLogged) > 56) continue
       const forecast = forecastFor(data, ctx, exercise, 4)
       const plan = planNextSession({ exercise, rows, sessions, profile: ctx.profile, asOf: ctx.asOf, forecast, goal: goals[exercise] })
-      if (!plan) continue
-      out.push(plan)
-      if (forecast) current.set(exercise, forecast.current)
+      if (plan) out.push(plan)
     }
     out.sort(
       (a, b) =>
@@ -239,7 +281,7 @@ function NextSessionTab({ data, ctx, picked, onPick }: { data: Dataset; ctx: Mod
         STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status) ||
         a.dueOn.getTime() - b.dueOn.getTime(),
     )
-    return { plans: out, current }
+    return out
     // `unit` isn't read here, but the reasons are written with the display-unit formatters.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [data, ctx, goals, unit])
@@ -271,100 +313,78 @@ function NextSessionTab({ data, ctx, picked, onPick }: { data: Dataset; ctx: Mod
         ))}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-5">
+      <div className="grid gap-4 lg:grid-cols-5 lg:items-start">
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="flex flex-wrap items-center gap-2">
               {plan.exercise}
               <Badge variant={STATUS[plan.status].variant}>{STATUS[plan.status].label}</Badge>
             </CardTitle>
-            <CardDescription>
-              Last time ({formatDate(plan.lastDate)}): {setsLabel(plan)}
+            <CardDescription className="grid gap-0.5">
+              <span className="flex items-center gap-1.5 font-medium text-foreground">
+                <CalendarClock className="size-4" />
+                {capitalize(relativeDay(ctx.asOf, plan.suggestedDate))} · {formatDate(plan.suggestedDate)}
+              </span>
+              <span className="text-xs">
+                Every ~{plan.typicalGapDays} day{plan.typicalGapDays > 1 ? "s" : ""} · {plan.muscle.toLowerCase()} recovered {formatDate(plan.readyFrom)} ({plan.restHours} h rest)
+              </span>
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-5">
             <div className="grid gap-1">
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>Next session target</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-3xl font-semibold tracking-tight tabular-nums">{targetLabel(plan)}</span>
                 <Badge variant="outline">{ACTION[plan.action]}</Badge>
-              </div>
-              <div className="text-3xl font-semibold tracking-tight tabular-nums">{targetLabel(plan)}</div>
-              <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                <span>
-                  {plan.target.sets} {plan.kind === "time" ? "" : "top "}set{plan.target.sets > 1 ? "s" : ""}
-                  {plan.targetE1rm > 0 ? ` · est. 1RM ${fmtKg(plan.targetE1rm)}` : ""}
-                </span>
                 {plan.isPr ? (
                   <Badge variant="secondary">
-                    <Trophy /> PR if you hit it
+                    <Trophy /> PR
                   </Badge>
                 ) : null}
               </div>
-              <p className="mt-1 text-sm">{plan.reason}</p>
-              {plan.kind === "time" ? null : (
-                <p className="text-xs text-muted-foreground">
-                  {plan.repRangeFromGoal
-                    ? `Working in your goal's ${plan.repRange.min === plan.repRange.max ? plan.repRange.min : `${plan.repRange.min}–${plan.repRange.max}`} reps`
-                    : `Working at your usual ${plan.repRange.min} reps — set a rep range below to change it`}
-                </p>
-              )}
+              <div className="text-sm text-muted-foreground">
+                {plan.target.sets} {plan.kind === "time" ? "" : "top "}set{plan.target.sets > 1 ? "s" : ""}
+                {plan.targetE1rm > 0 ? ` · est. 1RM ${fmtKg(plan.targetE1rm)}` : ""}
+              </div>
+              <p className="mt-2 text-sm">{plan.reason}</p>
+              <p className="text-xs text-muted-foreground">
+                Last time ({formatDate(plan.lastDate)}): {setsLabel(plan)}
+              </p>
+            </div>
+
+            <div className="grid gap-1.5">
+              <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <Target className="size-3.5" /> {goalSummary(plan)}
+                </span>
+                <span className="flex items-center gap-2">
+                  {plan.goal && plan.targetValue >= plan.goal.target ? (
+                    <span>Reached with this target</span>
+                  ) : plan.goal?.progress != null ? (
+                    <span className="tabular-nums">{fmtInt(plan.goal.progress * 100)}%</span>
+                  ) : null}
+                  <Button className="h-auto p-0 text-xs" onClick={() => onEditGoal(plan.exercise)} variant="link">
+                    {plan.goal || plan.repRangeFromGoal ? "Edit" : "Set goal"}
+                  </Button>
+                </span>
+              </div>
+              {plan.goal?.progress != null ? <Progress aria-label="Progress towards goal" value={plan.goal.progress * 100} /> : null}
               {plan.note ? <p className="text-xs text-muted-foreground">{plan.note}</p> : null}
             </div>
 
-            {plan.goal ? (
-              <div className="grid gap-1.5">
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <Target className="size-3.5" /> Goal {PLAN_METRIC_LABEL[plan.kind]} {planValue(plan, plan.goal.target)}
-                  </span>
-                  {plan.goal.progress != null ? <span className="tabular-nums">{fmtInt(plan.goal.progress * 100)}% of the way</span> : null}
-                </div>
-                {plan.goal.progress != null ? <Progress aria-label="Progress towards goal" value={plan.goal.progress * 100} /> : null}
-                <p className="text-xs text-muted-foreground">
-                  {plan.targetValue >= plan.goal.target
-                    ? "Hitting this target reaches your goal."
-                    : `This target is ${PLAN_METRIC_LABEL[plan.kind]} ${planValue(plan, plan.targetValue)}${plan.goal.start != null ? `, from ${planValue(plan, plan.goal.start)} when you set the goal` : ""}.`}
-                </p>
-              </div>
-            ) : null}
-
-            <div className="grid gap-2 text-sm">
-              <div className="flex items-center gap-2 font-medium">
-                <CalendarClock className="size-4" /> Train it {relativeDay(ctx.asOf, plan.suggestedDate)} · {formatDate(plan.suggestedDate)}
-              </div>
-              <ul className="grid gap-1 text-muted-foreground">
-                <li>
-                  {plan.muscle} recovered from {formatDate(plan.readyFrom)} ({plan.restHours} h rest after your last {plan.muscle.toLowerCase()} work)
-                </li>
-                <li>
-                  You usually do it every {plan.typicalGapDays} day{plan.typicalGapDays > 1 ? "s" : ""} → {formatDate(plan.dueOn)}
-                </li>
-              </ul>
-            </div>
-
             {plan.alternatives ? (
-              <div className="grid gap-1">
-                <div className="text-xs text-muted-foreground">Same effort, other rep counts</div>
-                <div className="grid grid-cols-5 gap-1 text-center text-sm">
-                  {plan.alternatives.map((a) => (
-                    <div className="rounded-md bg-muted/50 py-1.5" key={a.reps}>
-                      <div className="text-xs text-muted-foreground">{a.reps} reps</div>
-                      <div className="tabular-nums">{fmtKg(a.weight)}</div>
-                    </div>
-                  ))}
-                </div>
+              <div className="grid border-t text-sm">
+                <Disclosure title="Same effort at other reps">
+                  <div className="grid grid-cols-5 gap-1 text-center">
+                    {plan.alternatives.map((a) => (
+                      <div className="rounded-md bg-muted/50 py-1.5" key={a.reps}>
+                        <div className="text-xs text-muted-foreground">{a.reps} reps</div>
+                        <div className="tabular-nums">{fmtKg(a.weight)}</div>
+                      </div>
+                    ))}
+                  </div>
+                </Disclosure>
               </div>
             ) : null}
-
-            <div className="grid gap-2 border-t pt-4">
-              <div className="text-xs font-medium text-muted-foreground">Goal for {plan.exercise}</div>
-              <GoalEditor
-                current={current.get(plan.exercise) ?? null}
-                exercise={plan.exercise}
-                key={plan.exercise}
-                metric={forecastMetricFor(plan.kind) ?? "e1rm"}
-              />
-            </div>
           </CardContent>
         </Card>
 
@@ -395,6 +415,12 @@ function NextSessionTab({ data, ctx, picked, onPick }: { data: Dataset; ctx: Mod
                   <TableCell className="text-right tabular-nums">
                     {p.kind === "time" ? `${p.target.sets} × ${fmtDuration(p.target.seconds ?? 0)}` : `${p.target.sets} × ${p.target.reps} @ ${loadLabel(p, p.target.weight)}`}
                     {p.isPr ? <Trophy aria-label="PR" className="ml-1 inline size-3.5 text-muted-foreground" /> : null}
+                    {p.goal ? (
+                      <div className="text-xs text-muted-foreground">
+                        Goal {PLAN_METRIC_LABEL[p.kind]} {planValue(p, p.goal.target)}
+                        {p.goal.progress != null ? ` · ${fmtInt(p.goal.progress * 100)}%` : ""}
+                      </div>
+                    ) : null}
                   </TableCell>
                 </TableRow>
               ))}
@@ -426,7 +452,6 @@ function forecastRows(f: StrengthForecast, baseline: StrengthForecast | null) {
     upper: h.value,
     lower: h.value,
     baseline: h.value,
-    fitted: h.fitted,
     projected: false,
   }))
   const last = f.history.at(-1)!
@@ -439,7 +464,6 @@ function forecastRows(f: StrengthForecast, baseline: StrengthForecast | null) {
       upper: p.upper,
       lower: p.lower,
       baseline: baseline?.forecast.find((b) => b.date.getTime() === p.date.getTime())?.expected ?? p.expected,
-      fitted: p.trend,
       projected: true,
       week: i + 1,
     })
@@ -447,15 +471,31 @@ function forecastRows(f: StrengthForecast, baseline: StrengthForecast | null) {
   return rows
 }
 
-function StrengthTab({ data, ctx, picked, onPick }: { data: Dataset; ctx: ModelContext; picked: string | null; onPick: (e: string) => void }) {
-  const { profile } = ctx
-  const candidates = useMemo(
-    () =>
-      exerciseUsage(data.allSessions).filter((u) => forecastableSessions(data.allSessions.get(u.exercise) ?? []).length >= 2),
+/** Exercises with enough sessions to forecast, most used first. */
+function useForecastCandidates(data: Dataset) {
+  return useMemo(
+    () => exerciseUsage(data.allSessions).filter((u) => forecastableSessions(data.allSessions.get(u.exercise) ?? []).length >= 2),
     [data.allSessions],
   )
-  const defaultExercise = candidates.find((c) => mainLiftOf(c.exercise))?.exercise ?? candidates[0]?.exercise ?? ""
-  const exercise = picked && candidates.some((c) => c.exercise === picked) ? picked : defaultExercise
+}
+
+function pickExercise(candidates: { exercise: string }[], picked: string | null, preferred?: (e: string) => boolean) {
+  if (picked && candidates.some((c) => c.exercise === picked)) return picked
+  return candidates.find((c) => preferred?.(c.exercise))?.exercise ?? candidates.find((c) => mainLiftOf(c.exercise))?.exercise ?? candidates[0]?.exercise ?? ""
+}
+
+/** When a forecast reaches a target: "Reached", "Beyond potential" or a date. */
+function etaLabel(f: StrengthForecast, target: number) {
+  const weeks = weeksToTarget(f, target)
+  if (weeks === 0) return "Reached"
+  if (weeks === null) return "Beyond potential"
+  return formatDate(dateAfterWeeks(f.forecast[0].date, weeks))
+}
+
+function StrengthTab({ data, ctx, picked, onPick, onEditGoal }: TabProps) {
+  const { profile } = ctx
+  const candidates = useForecastCandidates(data)
+  const exercise = pickExercise(candidates, picked)
   const [horizon, setHorizon] = usePersistentState<number>("gymviz.predictions.horizon", 12)
   const baseScenario: RecoveryInputs = {
     sleepHours: profile.sleepHours,
@@ -488,9 +528,6 @@ function StrengthTab({ data, ctx, picked, onPick }: { data: Dataset; ctx: ModelC
   const rows = forecast ? forecastRows(forecast, baseline).map((r) => (target > 0 ? { ...r, goal: target } : r)) : []
   const dashFrom = forecast ? forecast.history.length - 1 : undefined
   const series: Series[] = [
-    { key: "upper", label: "80% range", color: SERIES[0], dashFromIndex: dashFrom, strokeWidth: 1, hideInLegend: true },
-    { key: "lower", label: "80% range", color: SERIES[0], dashFromIndex: dashFrom, strokeWidth: 1, hideInLegend: true },
-    { key: "fitted", label: "Log trend (data only)", color: "var(--muted-foreground)", strokeWidth: 1.5, legendDashed: false },
     ...(baseline
       ? [{ key: "baseline", label: "Current habits", color: SERIES[1], dashFromIndex: dashFrom, legendDashed: true } satisfies Series]
       : []),
@@ -500,9 +537,7 @@ function StrengthTab({ data, ctx, picked, onPick }: { data: Dataset; ctx: ModelC
       : []),
   ]
   const end = forecast?.forecast.at(-1)
-  const targetWeeks = forecast && target > 0 ? weeksToTarget(forecast, target) : undefined
-  const start = forecast?.forecast[0].date ?? ctx.asOf
-  const pace = forecast && goal ? goalPace(forecast, goal, start) : null
+  const pace = forecast && goal ? goalPace(forecast, goal, forecast.forecast[0].date) : null
 
   return (
     <div className="grid gap-4">
@@ -521,162 +556,281 @@ function StrengthTab({ data, ctx, picked, onPick }: { data: Dataset; ctx: ModelC
         <>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <StatCard
-              hint={forecast.detrainingPct > 0 ? `−${fmt1(forecast.detrainingPct * 100)}% from the layoff` : `from ${forecast.sessions} sessions`}
+              hint={forecast.detrainingPct > 0 ? `−${fmt1(forecast.detrainingPct * 100)}% from the layoff` : "Recent sessions weighted most"}
               label={`Current ${m.label.toLowerCase()}`}
               value={m.format(forecast.current)}
             />
-            <StatCard hint={`80% range ${m.format(end.lower)}–${m.format(end.upper)}`} label={`In ${horizon} weeks`} value={m.format(end.expected)} />
-            <StatCard hint="Slows as you approach your potential" label="Expected gain now" value={fmtRate(metric, forecast.weeklyGain)} />
+            <StatCard hint={`+${fmtRate(metric, forecast.weeklyGain)} now · 80% ${m.format(end.lower)}–${m.format(end.upper)}`} label={`In ${horizon} weeks`} value={m.format(end.expected)} />
+            <StatCard hint={`of a potential ≈ ${m.format(forecast.ceiling)}`} label="Of potential" value={`${fmtInt(forecast.percentOfPotential * 100)}%`} />
             <StatCard
-              hint={`Potential ≈ ${m.format(forecast.ceiling)}${forecast.mainLift ? " (bodyweight-scaled standard)" : " (from training age)"}`}
-              label="Of potential"
-              value={`${fmtInt(forecast.percentOfPotential * 100)}%`}
+              hint={
+                goal?.target != null ? (
+                  <>
+                    Goal {m.format(goal.target)}
+                    {pace ? (pace.weeksLeft <= 0 ? " · deadline passed" : pace.onTrack ? " · on track" : " · behind deadline") : ""}
+                  </>
+                ) : (
+                  <Button className="h-auto p-0 text-xs" onClick={() => onEditGoal(exercise)} variant="link">
+                    Set a goal
+                  </Button>
+                )
+              }
+              label="Goal"
+              value={goal?.target != null ? etaLabel(forecast, goal.target) : "—"}
             />
           </div>
 
-          <div className="grid gap-4 xl:grid-cols-3">
+          <div className="grid gap-4 xl:grid-cols-3 xl:items-start">
             <ChartCard
               className="xl:col-span-2"
-              description="Solid = logged sessions, dashed = forecast with its 80% range. The grey line is a pure log-trend fit for comparison."
+              description="Solid = logged sessions, dashed = forecast. The shaded band is where you'll land 8 times out of 10."
               title={`${exercise} forecast`}
             >
-              <TimeLineChart data={rows} format={metric === "seconds" ? fmtDuration : fmt1} height={320} series={series}>
-                <ReferenceArea
-                  fill="var(--muted-foreground)"
-                  fillOpacity={0.06}
-                  fadeEdges={false}
-                  x1={forecast.history.at(-1)!.date}
-                />
+              <TimeLineChart
+                band={{ lower: "lower", upper: "upper", label: "80% range", color: SERIES[0] }}
+                data={rows}
+                format={metric === "seconds" ? fmtDuration : fmt1}
+                height={320}
+                series={series}
+              >
+                <ReferenceArea fadeEdges={false} fill="var(--muted-foreground)" fillOpacity={0.06} x1={forecast.history.at(-1)!.date} />
               </TimeLineChart>
             </ChartCard>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>What if…</CardTitle>
-                <CardDescription>Change recovery inputs for the forecast period</CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-5">
-                <ScenarioSlider label="Sleep" format={(v) => `${v} h`} max={10} min={4} onChange={(v) => setScenario({ ...scenario, sleepHours: v })} step={0.5} value={scenario.sleepHours} />
-                <ScenarioSlider label="Stress" format={(v) => `${v}/5`} max={5} min={1} onChange={(v) => setScenario({ ...scenario, stress: v })} step={1} value={scenario.stress} />
-                <ScenarioSlider label="Protein" format={(v) => `${v} g/kg`} max={3} min={0.6} onChange={(v) => setScenario({ ...scenario, proteinGPerKg: v })} step={0.1} value={scenario.proteinGPerKg} />
-                <div className="grid gap-1.5">
-                  <Label>Energy balance</Label>
-                  <ToggleGroup
-                    onValueChange={(v) => v && setScenario({ ...scenario, nutrition: v as NutritionState })}
-                    size="sm"
-                    type="single"
-                    value={scenario.nutrition}
-                    variant="outline"
-                  >
-                    <ToggleGroupItem value="deficit">Deficit</ToggleGroupItem>
-                    <ToggleGroupItem value="maintenance">Maintain</ToggleGroupItem>
-                    <ToggleGroupItem value="surplus">Surplus</ToggleGroupItem>
-                  </ToggleGroup>
-                </div>
-                <Button disabled={!scenarioChanged} onClick={() => setScenario(baseScenario)} size="sm" variant="outline">
-                  <RotateCcw /> Reset to my profile
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-3">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Target className="size-4" /> Goal
-                </CardTitle>
-                <CardDescription>
-                  {metric === "seconds"
-                    ? "A target hold and deadline."
-                    : `A ${metric === "e1rm" ? "target 1RM" : "target rep count"}, rep range and deadline. The rep range drives your next-session targets.`}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-3">
-                <GoalEditor current={forecast.current} exercise={exercise} key={exercise} metric={metric} />
-                {targetWeeks === undefined ? (
-                  <p className="text-sm text-muted-foreground">Enter a target.</p>
-                ) : targetWeeks === null ? (
-                  <p className="text-sm">
-                    Beyond your estimated potential of {m.format(forecast.ceiling)}
-                    {metric === "e1rm" ? " — gaining bodyweight or lean mass would raise it." : " for now — it grows with training age."}
-                  </p>
-                ) : targetWeeks === 0 ? (
-                  <p className="text-sm">You're already there.</p>
-                ) : (
-                  <p className="text-sm">
-                    Around <span className="font-semibold">{formatDate(dateAfterWeeks(start, targetWeeks))}</span>
-                    <span className="text-muted-foreground"> · {fmtInt(targetWeeks)} weeks at your current habits and training</span>
-                  </p>
-                )}
-                {pace ? (
-                  <p className={pace.onTrack ? "text-sm text-muted-foreground" : "text-sm"}>
-                    {pace.weeksLeft <= 0
-                      ? "Your deadline has passed — set a new one."
-                      : pace.onTrack
-                        ? `On track for ${formatDate(pace.deadline)}: needs ${fmtRate(metric, pace.requiredPerWeek)}, forecast ${fmtRate(metric, forecast.weeklyGain)} now.`
-                        : `Behind for ${formatDate(pace.deadline)}: needs ${fmtRate(metric, pace.requiredPerWeek)}, forecast ${fmtRate(metric, forecast.weeklyGain)} now. Try the What-if sliders to see what closes the gap.`}
-                  </p>
-                ) : null}
-              </CardContent>
-            </Card>
-
-            {metric === "e1rm" ? (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Rep maxes in {horizon} weeks</CardTitle>
-                  <CardDescription>Working weights from the forecast 1RM</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Reps</TableHead>
-                        <TableHead className="text-right">Now</TableHead>
-                        <TableHead className="text-right">Forecast</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {[1, 3, 5, 8, 10].map((r) => (
-                        <TableRow key={r}>
-                          <TableCell>{r}</TableCell>
-                          <TableCell className="text-right tabular-nums">{fmt1(toUnit(loadForReps(forecast.current, r)))}</TableCell>
-                          <TableCell className="text-right tabular-nums">{fmt1(toUnit(loadForReps(end.expected, r)))}</TableCell>
+            <div className="grid content-start gap-4">
+              {metric === "e1rm" ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Rep maxes</CardTitle>
+                    <CardDescription>Heaviest weight for each rep count, now and in {horizon} weeks</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Reps</TableHead>
+                          <TableHead className="text-right">Now</TableHead>
+                          <TableHead className="text-right">In {horizon}w</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {[1, 3, 5, 8, 10].map((r) => (
+                          <TableRow key={r}>
+                            <TableCell>{r}</TableCell>
+                            <TableCell className="text-right tabular-nums">{fmt1(toUnit(loadForReps(forecast.current, r)))}</TableCell>
+                            <TableCell className="text-right tabular-nums">{fmt1(toUnit(loadForReps(end.expected, r)))}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              ) : null}
+
+              <Card className="py-0">
+                <CardContent className="text-sm">
+                  <Disclosure summary={scenarioChanged ? "Changed" : "Your profile"} title="What if…">
+                    <div className="grid gap-5 pt-1">
+                      <ScenarioSlider label="Sleep" format={(v) => `${v} h`} max={10} min={4} onChange={(v) => setScenario({ ...scenario, sleepHours: v })} step={0.5} value={scenario.sleepHours} />
+                      <ScenarioSlider label="Stress" format={(v) => `${v}/5`} max={5} min={1} onChange={(v) => setScenario({ ...scenario, stress: v })} step={1} value={scenario.stress} />
+                      <ScenarioSlider label="Protein" format={(v) => `${v} g/kg`} max={3} min={0.6} onChange={(v) => setScenario({ ...scenario, proteinGPerKg: v })} step={0.1} value={scenario.proteinGPerKg} />
+                      <div className="grid gap-1.5">
+                        <Label>Energy balance</Label>
+                        <ToggleGroup
+                          onValueChange={(v) => v && setScenario({ ...scenario, nutrition: v as NutritionState })}
+                          size="sm"
+                          type="single"
+                          value={scenario.nutrition}
+                          variant="outline"
+                        >
+                          <ToggleGroupItem value="deficit">Deficit</ToggleGroupItem>
+                          <ToggleGroupItem value="maintenance">Maintain</ToggleGroupItem>
+                          <ToggleGroupItem value="surplus">Surplus</ToggleGroupItem>
+                        </ToggleGroup>
+                      </div>
+                      <Button disabled={!scenarioChanged} onClick={() => setScenario(baseScenario)} size="sm" variant="outline">
+                        <RotateCcw /> Reset to my profile
+                      </Button>
+                    </div>
+                  </Disclosure>
                 </CardContent>
               </Card>
-            ) : null}
-
-            <Card>
-              <CardHeader>
-                <CardTitle>What drives this forecast</CardTitle>
-                <CardDescription>
-                  Rate {(forecast.rate * 100).toFixed(2)}%/wk of the gap to potential
-                  {forecast.dataRate != null ? ` · your history alone suggests ${(forecast.dataRate * 100).toFixed(2)}%` : ""}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-3">
-                {forecast.factors.map((f) => (
-                  <div className="grid gap-1" key={f.key}>
-                    <div className="flex items-center justify-between text-sm">
-                      <span>{f.label}</span>
-                      <span className="tabular-nums text-muted-foreground">{Math.round(f.value * 100)}%</span>
-                    </div>
-                    <Progress aria-label={f.label} value={f.value * 100} />
-                    <p className="text-xs text-muted-foreground">{f.detail}</p>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
+            </div>
           </div>
-          <HowItWorks />
+
+          <Card className="py-0">
+            <CardContent className="text-sm">
+              <Disclosure summary={`${(forecast.rate * 100).toFixed(2)}%/wk of the gap to potential`} title="How this is calculated">
+                <HowItWorks forecast={forecast} />
+              </Disclosure>
+            </CardContent>
+          </Card>
         </>
       ) : (
         <EmptyChart>Not enough sessions of {exercise} to forecast</EmptyChart>
       )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Goals
+// ---------------------------------------------------------------------------
+
+function GoalsTab({ data, ctx, picked, onPick }: Omit<TabProps, "onEditGoal">) {
+  const { goals, setGoal } = useStore()
+  const candidates = useForecastCandidates(data)
+  const exercise = pickExercise(candidates, picked, (e) => goals[e] != null)
+  // Bumped on "Remove" so the editor's drafts reset.
+  const [cleared, setCleared] = useState(0)
+
+  const rows = useMemo(
+    () =>
+      Object.values(goals)
+        .filter((g) => candidates.some((c) => c.exercise === g.exercise))
+        .map((goal) => {
+          const forecast = forecastFor(data, ctx, goal.exercise, 12)
+          const progress =
+            forecast && goal.target != null && goal.start != null && goal.target > goal.start
+              ? Math.min(1, Math.max(0, (forecast.current - goal.start) / (goal.target - goal.start)))
+              : null
+          return { goal, forecast, progress, pace: forecast ? goalPace(forecast, goal, forecast.forecast[0].date) : null }
+        })
+        .sort((a, b) => a.goal.exercise.localeCompare(b.goal.exercise)),
+    [goals, candidates, data, ctx],
+  )
+
+  if (!candidates.length) {
+    return <EmptyChart>Log an exercise at least twice to set a goal</EmptyChart>
+  }
+  const forecast = forecastFor(data, ctx, exercise, 12)
+  const metric = forecast?.metric ?? "e1rm"
+  const m = METRIC[metric]
+  const goal = goals[exercise]
+  const pace = forecast && goal ? goalPace(forecast, goal, forecast.forecast[0].date) : null
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-5 lg:items-start">
+      <Card className="lg:col-span-2">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Target className="size-4" /> Goal
+          </CardTitle>
+          <CardDescription>
+            {metric === "seconds"
+              ? "A target hold and a deadline."
+              : `A ${metric === "e1rm" ? "target 1RM" : "target rep count"}, a deadline, and the rep range your next-session targets work in.`}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          <ExerciseSelect className="sm:w-full" exercises={candidates} onChange={onPick} value={exercise} />
+          <GoalEditor current={forecast?.current ?? null} exercise={exercise} key={`${exercise}-${cleared}`} metric={metric} />
+          {forecast ? (
+            <div className="grid gap-1 text-sm">
+              <p className="text-muted-foreground">Now: {m.format(forecast.current)}</p>
+              {goal?.target != null ? (
+                <p>
+                  {weeksToTarget(forecast, goal.target) === null ? (
+                    <>
+                      Beyond your estimated potential of {m.format(forecast.ceiling)}
+                      {metric === "e1rm" ? ". Gaining bodyweight or lean mass would raise it." : " for now. It grows with training age."}
+                    </>
+                  ) : (
+                    <>
+                      Expected: <span className="font-semibold">{etaLabel(forecast, goal.target)}</span>
+                      <span className="text-muted-foreground"> at your current habits</span>
+                    </>
+                  )}
+                </p>
+              ) : null}
+              {pace ? (
+                <p className="text-muted-foreground">
+                  {pace.weeksLeft <= 0
+                    ? "Your deadline has passed. Set a new one."
+                    : `${pace.onTrack ? "On track" : "Behind"} for ${formatDate(pace.deadline)}: needs ${fmtRate(metric, pace.requiredPerWeek)}, forecast ${fmtRate(metric, forecast.weeklyGain)} now.`}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          {goal ? (
+            <Button
+              className="justify-self-start"
+              onClick={() => {
+                setGoal({ ...goal, target: null, start: null, repRange: null, deadline: null, updatedAt: new Date().toISOString() })
+                setCleared((n) => n + 1)
+              }}
+              size="sm"
+              variant="outline"
+            >
+              Remove goal
+            </Button>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <ChartCard className="lg:col-span-3" description="Pick one to edit it." title="Your goals">
+        {rows.length ? (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Exercise</TableHead>
+                <TableHead>Progress</TableHead>
+                <TableHead>Expected</TableHead>
+                <TableHead>Deadline</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map(({ goal: g, forecast: f, progress, pace: p }) => {
+                const gm = METRIC[f?.metric ?? "e1rm"]
+                return (
+                  <TableRow data-state={g.exercise === exercise ? "selected" : undefined} key={g.exercise}>
+                    <TableCell>
+                      <button className="grid text-left hover:underline" onClick={() => onPick(g.exercise)} type="button">
+                        <span>{g.exercise}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {[
+                            g.target != null ? `${f ? `${gm.format(f.current)} → ` : ""}${gm.format(g.target)}` : null,
+                            g.repRange ? `${g.repRange.min === g.repRange.max ? g.repRange.min : `${g.repRange.min}–${g.repRange.max}`} reps` : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </span>
+                      </button>
+                    </TableCell>
+                    <TableCell className="w-32">
+                      {progress != null ? (
+                        <div className="grid gap-1">
+                          <span className="text-xs tabular-nums text-muted-foreground">{fmtInt(progress * 100)}%</span>
+                          <Progress aria-label={`Progress towards ${g.exercise} goal`} value={progress * 100} />
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">–</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="tabular-nums">{f && g.target != null ? etaLabel(f, g.target) : <span className="text-muted-foreground">–</span>}</TableCell>
+                    <TableCell>
+                      {g.deadline ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="tabular-nums">{formatDate(parseDayKey(g.deadline))}</span>
+                          {p ? (
+                            <Badge variant={p.weeksLeft <= 0 || !p.onTrack ? "destructive" : "secondary"}>
+                              {p.weeksLeft <= 0 ? "Passed" : p.onTrack ? "On track" : "Behind"}
+                            </Badge>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">–</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        ) : (
+          <EmptyChart>No goals yet. Pick an exercise and set a target or rep range.</EmptyChart>
+        )}
+      </ChartCard>
     </div>
   )
 }
@@ -822,38 +976,49 @@ function ScenarioSlider(props: { label: string; value: number; onChange: (v: num
   )
 }
 
-function HowItWorks() {
+function HowItWorks({ forecast: f }: { forecast: StrengthForecast }) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Info className="size-4" /> How the strength model works
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
+    <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid content-start gap-3">
+        <p className="text-muted-foreground">
+          Rate {(f.rate * 100).toFixed(2)}%/wk of the gap to potential
+          {f.dataRate != null ? ` · your history alone suggests ${(f.dataRate * 100).toFixed(2)}%` : ""}. What moves it:
+        </p>
+        {f.factors.map((factor) => (
+          <div className="grid gap-1" key={factor.key}>
+            <div className="flex items-center justify-between">
+              <span>{factor.label}</span>
+              <span className="tabular-nums text-muted-foreground">{Math.round(factor.value * 100)}%</span>
+            </div>
+            <Progress aria-label={factor.label} value={factor.value * 100} />
+            <p className="text-xs text-muted-foreground">{factor.detail}</p>
+          </div>
+        ))}
+      </div>
+      <div className="grid content-start gap-2 text-muted-foreground">
         <p>
           Strength approaches a personal ceiling exponentially: <code className="text-foreground">e1RM(t) = C − (C − S₀)·e^(−k·t)</code>. Early
-          gains are fast; they slow as you close the gap. This captures diminishing returns better than a straight line.
+          gains are fast; they slow as you close the gap.
+        </p>
+        <p>
+          <span className="text-foreground">Recent sessions count most.</span> A session {f.halfLifeWeeks > HALF_LIFE_WEEKS ? fmtInt(f.halfLifeWeeks) : HALF_LIFE_WEEKS} weeks older
+          than your latest counts half as much, so this fit rests on about {fmtInt(f.effectiveSessions)} of your {f.sessions} sessions' worth of data.
+          {f.halfLifeWeeks > HALF_LIFE_WEEKS ? " The window is stretched because you train this exercise rarely." : ""}
         </p>
         <p>
           <span className="text-foreground">C (potential)</span> comes from bodyweight-scaled strength standards for squat, bench, deadlift and
           overhead press (strength ∝ mass<sup>⅔</sup>), adjusted for lean mass and age. Other lifts use training age to estimate headroom.
         </p>
         <p>
-          <span className="text-foreground">k (rate)</span> is fitted to your sessions and blended with a physiological prior built from sleep,
-          stress, energy balance, protein, age, training frequency and weekly volume for the muscle group. Few sessions → the prior dominates.
+          <span className="text-foreground">k (rate)</span> is fitted to your sessions and blended with a physiological prior built from the
+          factors on the left. Few recent sessions → the prior dominates.
         </p>
         <p>
-          The 80% range widens with the horizon, scaled by how noisy your sessions are. Layoffs longer than three weeks apply detraining
-          (≈0.6%/week). Energy balance also shifts projected bodyweight, which moves the ceiling.
+          The 80% range widens with the horizon, scaled by how noisy your recent sessions are. Layoffs longer than three weeks apply detraining
+          (≈0.6%/week). Rep-based and timed exercises use the same curve on your most reps or longest hold, with wider headroom.
         </p>
-        <p>
-          <span className="text-foreground">Rep-based and timed exercises</span> (toes to bar, planks) use the same curve on your most reps in a
-          set or your longest hold. Their headroom is wider than a 1RM's, since a little more strength buys many more reps or seconds, and it
-          doesn't scale with bodyweight.
-        </p>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }
 

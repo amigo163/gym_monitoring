@@ -1,6 +1,8 @@
 import { curveMonotoneX } from "@visx/curve"
+import { area } from "d3-shape"
 import type { ReactNode } from "react"
 import { Bar } from "@/components/charts/bar"
+import { useChartStable } from "@/components/charts/chart-context"
 import { BarChart } from "@/components/charts/bar-chart"
 import { BarXAxis } from "@/components/charts/bar-x-axis"
 import { BarYAxis } from "@/components/charts/bar-y-axis"
@@ -65,9 +67,9 @@ export function ChartCard({
   )
 }
 
-export function SeriesLegend({ series }: { series: Series[] }) {
+export function SeriesLegend({ series, bands = [] }: { series: Series[]; bands?: Pick<Band, "label" | "color">[] }) {
   const items = series.filter((s) => !s.hideInLegend)
-  if (items.length < 2) return null
+  if (items.length + bands.length < 2) return null
   return (
     <ul className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
       {items.map((s) => (
@@ -82,6 +84,12 @@ export function SeriesLegend({ series }: { series: Series[] }) {
           {s.label}
         </li>
       ))}
+      {bands.map((b) => (
+        <li className="flex items-center gap-1.5" key={b.label}>
+          <span aria-hidden className="inline-block h-2.5 w-4 rounded-sm" style={{ background: b.color, opacity: 0.25 }} />
+          {b.label}
+        </li>
+      ))}
     </ul>
   )
 }
@@ -94,6 +102,27 @@ export function EmptyChart({ children, className }: { children: ReactNode; class
   )
 }
 
+/** A shaded range between two keys (e.g. a forecast's 80% interval). */
+export interface Band {
+  lower: string
+  upper: string
+  label: string
+  color: string
+}
+
+function BandArea({ band }: { band: Band }) {
+  const { data, xScale, yScale, xAccessor } = useChartStable()
+  // Start where the range opens (from the point before it), so nothing is drawn under the history.
+  const opens = data.findIndex((d) => typeof d[band.lower] === "number" && d[band.lower] !== d[band.upper])
+  const points = opens < 0 ? [] : data.slice(Math.max(0, opens - 1)).filter((d) => typeof d[band.lower] === "number" && typeof d[band.upper] === "number")
+  const path = area<Record<string, unknown>>()
+    .x((d) => xScale(xAccessor(d)))
+    .y0((d) => yScale(d[band.lower] as number))
+    .y1((d) => yScale(d[band.upper] as number))
+    .curve(curveMonotoneX)(points)
+  return path ? <path d={path} fill={band.color} fillOpacity={0.14} /> : null
+}
+
 export function TimeLineChart({
   data,
   series,
@@ -102,6 +131,7 @@ export function TimeLineChart({
   children,
   xKey = "date",
   includeY,
+  band,
 }: {
   data: Record<string, unknown>[]
   series: Series[]
@@ -111,6 +141,7 @@ export function TimeLineChart({
   xKey?: string
   /** Values the y-axis must reach, e.g. the top of a reference band. */
   includeY?: number[]
+  band?: Band
 }) {
   if (data.length < 2) return <EmptyChart>Not enough data for a trend yet</EmptyChart>
   let yDomainMax: number | undefined
@@ -121,10 +152,17 @@ export function TimeLineChart({
   }
   return (
     <div>
-      <SeriesLegend series={series} />
+      <SeriesLegend bands={band ? [band] : []} series={series} />
       <LineChart aspectRatio="" data={data} margin={{ left: 44 }} style={{ height }} xDataKey={xKey} yDomainMax={yDomainMax}>
         <Grid horizontal />
         {children}
+        {band ? <BandArea band={band} /> : null}
+        {/* Invisible bounds keep the band inside the y-domain. */}
+        {band
+          ? [band.lower, band.upper].map((key) => (
+              <Line dataKey={key} fadeEdges={false} key={key} showHighlight={false} stroke="transparent" strokeWidth={0} />
+            ))
+          : null}
         {series.map((s) => (
           <Line
             curve={curveMonotoneX}
@@ -140,13 +178,16 @@ export function TimeLineChart({
         <YAxis formatValue={format} />
         <XAxis />
         <ChartTooltip
-          rows={(p) =>
-            series.map((s) => ({
+          rows={(p) => [
+            ...series.map((s) => ({
               color: s.color,
               label: s.label,
               value: s.hideInTooltip || typeof p[s.key] !== "number" ? "–" : format(p[s.key] as number),
-            }))
-          }
+            })),
+            ...(band && typeof p[band.lower] === "number" && typeof p[band.upper] === "number" && p[band.upper] !== p[band.lower]
+              ? [{ color: band.color, label: band.label, value: `${format(p[band.lower] as number)}–${format(p[band.upper] as number)}` }]
+              : []),
+          ]}
         />
       </LineChart>
     </div>

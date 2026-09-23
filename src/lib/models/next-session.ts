@@ -35,7 +35,7 @@ export interface NextSession {
   /** Reps per top set the plan works in: your goal's range, or your usual reps. */
   repRange: { min: number; max: number }
   repRangeFromGoal: boolean
-  /** How far hitting the target gets you towards your goal, in the main metric (0–1; null without a starting point). */
+  /** How far your current level is towards your goal, in the main metric (0–1; null without a starting point). */
   goal: { target: number; start: number | null; progress: number | null } | null
   /** Advice that follows from your goal. */
   note: string | null
@@ -144,11 +144,13 @@ export function planNextSession({ exercise, rows, sessions, profile, asOf, forec
     lastSets: lastSets.map((s) => ({ weight: s.weight, reps: s.reps, seconds: s.seconds, rpe: s.rpe })),
     ...timing,
   }
-  const goalFor = (value: number) => {
+  // Where you are now in the goal's metric: the strength model's estimate, else your last session's best.
+  const now = forecast?.current ?? (kind === "time" ? lastSession.bestSeconds : kind === "reps" ? lastSession.bestReps : lastSession.bestE1rm)
+  const goalFor = () => {
     const target = goal?.target ?? null
     const start = goal?.start ?? null
-    if (target == null || !(target > 0) || !(value > 0)) return null
-    return { target, start, progress: start != null && target > start ? clamp((value - start) / (target - start), 0, 1) : null }
+    if (target == null || !(target > 0)) return null
+    return { target, start, progress: start != null && target > start && now > 0 ? clamp((now - start) / (target - start), 0, 1) : null }
   }
 
   if (kind === "time") {
@@ -165,7 +167,7 @@ export function planNextSession({ exercise, rows, sessions, profile, asOf, forec
       isPr: hold.seconds > best,
       repRange: { min: 0, max: 0 },
       repRangeFromGoal: false,
-      goal: goalFor(hold.seconds),
+      goal: goalFor(),
       note: null,
       alternatives: null,
     }
@@ -288,7 +290,7 @@ export function planNextSession({ exercise, rows, sessions, profile, asOf, forec
     isPr: targetValue > 0 && targetValue > best * 1.001,
     repRange: range,
     repRangeFromGoal,
-    goal: goalFor(targetValue),
+    goal: goalFor(),
     note,
     alternatives: !assisted && offset < 1 && target.weight > 0 ? repOptions(targetE1rm, inc) : null,
   }

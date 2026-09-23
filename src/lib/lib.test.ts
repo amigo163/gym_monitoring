@@ -9,7 +9,7 @@ import {
 } from "./analysis"
 import { acuteChronic, dailyLoads, fitnessFatigue, readiness } from "./models/load"
 import { DEFAULT_PROFILE, bodyweightAt, classify, dots, mainLiftOf } from "./models/physiology"
-import { detrainingFraction, forecastStrength, weeksToTarget } from "./models/strength"
+import { detrainingFraction, forecastStrength, recencyWeights, weeksToTarget } from "./models/strength"
 import { personalLandmarks, planVolume } from "./models/volume"
 import { planNextSession } from "./models/next-session"
 import { muscleGroupFor, setMuscleOverrides } from "./muscles"
@@ -160,6 +160,34 @@ describe("strength forecast", () => {
     expect(f.detrainingPct).toBeGreaterThan(0)
   })
 
+  it("weights recent sessions most", () => {
+    // An old session, then weekly training for 30 weeks.
+    const ts = [0, ...Array.from({ length: 31 }, (_, i) => 70 + i)]
+    const { weights, halfLifeWeeks } = recencyWeights(ts)
+    expect(halfLifeWeeks).toBe(12)
+    expect(weights.at(-1)).toBe(1)
+    expect(weights[ts.indexOf(88)]).toBeCloseTo(0.5)
+    expect(weights[0]).toBeLessThan(0.01)
+  })
+
+  it("stretches the half-life for rarely trained exercises", () => {
+    const ts = [0, 30, 60, 90, 120, 150, 180, 210]
+    const { weights, halfLifeWeeks } = recencyWeights(ts)
+    expect(halfLifeWeeks).toBeGreaterThan(12)
+    expect(weights.reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(6)
+  })
+
+  it("follows recent sessions over an old peak", () => {
+    const at = (week: number) => new Date(2023, 0, 2 + week * 7)
+    // Strong two years ago, a long break, then a lower but rising restart.
+    const old = [0, 1, 2, 3, 4, 5].map((w) => ({ date: at(w), value: 100 + w }))
+    const recent = [100, 101, 102, 103, 104, 105, 106, 107].map((w, i) => ({ date: at(w), value: 70 + i * 1.5 }))
+    const series = [...old, ...recent].map(({ date, value }) => ({ ...bench[0], date, bestE1rm: value, workoutId: String(date.getTime()) }))
+    const f = forecastStrength(series, { profile: DEFAULT_PROFILE, horizonWeeks: 4, today: at(107) })!
+    expect(f.current).toBeLessThan(85)
+    expect(f.effectiveSessions).toBeLessThan(series.length)
+  })
+
   it("solves time to a target", () => {
     const f = forecastStrength(bench, { profile: DEFAULT_PROFILE, horizonWeeks: 12, today: asOf })!
     expect(weeksToTarget(f, f.current - 1)).toBe(0)
@@ -295,7 +323,8 @@ describe("next session", () => {
     const rows = [...bench(1, [[60, 8], [60, 8]]), ...bench(4, [[60, 8], [60, 8]])]
     const p = plan(rows, new Date(2024, 0, 5, 12), { target: 100, start: 70 })
     expect(p.goal?.target).toBe(100)
-    expect(p.goal?.progress).toBeCloseTo((p.targetE1rm - 70) / 30)
+    // Measured from where you are now (best e1RM last session), not from the planned target.
+    expect(p.goal?.progress).toBeCloseTo((estimateOneRepMax(60, 8) - 70) / 30)
     expect(plan(rows, new Date(2024, 0, 5, 12)).goal).toBeNull()
   })
 
@@ -469,7 +498,7 @@ describe("next session for reps and holds", () => {
     const rows = setsOf("Plank", [[1, [{ seconds: 60 }]], [4, [{ seconds: 70 }]]])
     const p = planFor("Plank", rows, new Date(2024, 0, 6, 12), { target: 120, start: 60 })!
     expect(p.targetValue).toBe(80)
-    expect(p.goal).toEqual({ target: 120, start: 60, progress: expect.closeTo(20 / 60) })
+    expect(p.goal).toEqual({ target: 120, start: 60, progress: expect.closeTo(10 / 60) })
   })
 
   it("adds reps for rep-based exercises and flags rep PRs", () => {

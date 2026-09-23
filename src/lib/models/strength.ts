@@ -13,7 +13,7 @@ import {
   recoveryFactors,
   scalingBodyweight,
 } from "./physiology"
-import { logFit, mean } from "./regression"
+import { mean } from "./regression"
 import { type VolumeLandmarks, volumeFactor } from "./volume"
 
 const WEEK_MS = 7 * DAY_MS
@@ -28,12 +28,32 @@ export const BASE_RATE = 0.02
 /** Pseudo-observations given to the physiological prior when blending with the data fit. */
 const PRIOR_WEIGHT = 6
 
+/** A session this many weeks older than your latest counts half as much in the fit. */
+export const HALF_LIFE_WEEKS = 12
+/** The half-life stretches until at least this many sessions' worth of weight is left (rarely trained exercises). */
+const MIN_EFFECTIVE_SESSIONS = 6
+
+/**
+ * Recency weights 0.5^(age / half-life), with age in weeks before the latest session. Old
+ * sessions still shape the long-term curve but barely move where you are now.
+ */
+export function recencyWeights(ts: number[], halfLifeWeeks = HALF_LIFE_WEEKS): { weights: number[]; halfLifeWeeks: number } {
+  const last = ts.at(-1) ?? 0
+  const needed = Math.min(MIN_EFFECTIVE_SESSIONS, 0.8 * ts.length)
+  let halfLife = halfLifeWeeks
+  let weights = ts.map((t) => 0.5 ** ((last - t) / halfLife))
+  while (weights.reduce((a, b) => a + b, 0) < needed && halfLife < 520) {
+    halfLife *= 1.5
+    weights = ts.map((t) => 0.5 ** ((last - t) / halfLife))
+  }
+  return { weights, halfLifeWeeks: halfLife }
+}
+
 export interface ForecastPoint {
   date: Date
   expected: number
   lower: number
   upper: number
-  trend: number
 }
 
 /** What a forecast is in: est. 1RM (kg), most reps in a set, or longest hold (seconds). */
@@ -84,6 +104,10 @@ export interface StrengthForecast {
   detrainingPct: number
   residualSd: number
   sessions: number
+  /** Recency half-life the fit used (stretched for rarely trained exercises). */
+  halfLifeWeeks: number
+  /** Sessions' worth of weight in the fit (sum of recency weights). */
+  effectiveSessions: number
 }
 
 export interface ForecastOptions {
@@ -120,7 +144,7 @@ export function detrainingFraction(daysOff: number): number {
   return weeks <= 3 ? 0 : Math.min(0.15, (weeks - 3) * 0.006)
 }
 
-function fitRate(ts: number[], ys: number[], ceiling: number) {
+function fitRate(ts: number[], ys: number[], ws: number[], ceiling: number) {
   // For fixed C and k, the best a in y = C − a·e^(−k·t) has a closed form.
   let best = { k: BASE_RATE, a: ceiling - mean(ys), sse: Number.POSITIVE_INFINITY }
   for (let i = 0; i <= 120; i++) {
@@ -129,12 +153,12 @@ function fitRate(ts: number[], ys: number[], ceiling: number) {
     let den = 0
     for (let j = 0; j < ts.length; j++) {
       const u = Math.exp(-k * ts[j])
-      num += (ceiling - ys[j]) * u
-      den += u * u
+      num += ws[j] * (ceiling - ys[j]) * u
+      den += ws[j] * u * u
     }
     const a = Math.max(num / den, 0)
     let sse = 0
-    for (let j = 0; j < ts.length; j++) sse += (ys[j] - (ceiling - a * Math.exp(-k * ts[j]))) ** 2
+    for (let j = 0; j < ts.length; j++) sse += ws[j] * (ys[j] - (ceiling - a * Math.exp(-k * ts[j]))) ** 2
     if (sse < best.sse) best = { k, a, sse }
   }
   return best
@@ -147,7 +171,8 @@ function fitRate(ts: number[], ys: number[], ceiling: number) {
  *   e1RM(t) = C − (C − S₀)·e^(−k·t)
  * - C comes from bodyweight-scaled strength standards (for the main lifts) or
  *   from training age for everything else, adjusted for age and lean mass.
- * - k is fitted to your history and blended with a prior built from sleep,
+ * - k is fitted to your history, recent sessions weighted most (12-week
+ *   half-life), and blended with a prior built from sleep,
  *   stress, energy balance, protein, age, training frequency and weekly volume.
  * - The future uses the scenario's recovery inputs, so changing sleep or diet
  *   changes the forecast.
@@ -190,10 +215,12 @@ export function forecastStrength(sessions: ExerciseSession[], opts: ForecastOpti
 
   // Data rate, blended with the prior in log space
   const n = points.length
-  const fit = n >= 3 ? fitRate(ts, ys, ceiling) : null
+  const { weights: ws, halfLifeWeeks } = recencyWeights(ts)
+  const effectiveSessions = ws.reduce((a, b) => a + b, 0)
+  const fit = n >= 3 ? fitRate(ts, ys, ws, ceiling) : null
   const dataRate = fit?.k ?? null
   const rate = dataRate
-    ? Math.exp((n * Math.log(dataRate) + PRIOR_WEIGHT * Math.log(priorRate)) / (n + PRIOR_WEIGHT))
+    ? Math.exp((effectiveSessions * Math.log(dataRate) + PRIOR_WEIGHT * Math.log(priorRate)) / (effectiveSessions + PRIOR_WEIGHT))
     : priorRate
 
   // Refit the intercept with the blended rate so history and forecast agree.
@@ -201,17 +228,17 @@ export function forecastStrength(sessions: ExerciseSession[], opts: ForecastOpti
   let denA = 0
   for (let j = 0; j < n; j++) {
     const u = Math.exp(-rate * ts[j])
-    numA += (ceiling - ys[j]) * u
-    denA += u * u
+    numA += ws[j] * (ceiling - ys[j]) * u
+    denA += ws[j] * u * u
   }
   const a = Math.max(numA / denA, 0)
   const model = (t: number) => ceiling - a * Math.exp(-rate * t)
-  const residuals = ys.map((y, j) => y - model(ts[j]))
-  const residualSd = Math.max(Math.sqrt(mean(residuals.map((r) => r * r))), best * 0.02)
+  const weightedSq = ys.reduce((acc, y, j) => acc + ws[j] * (y - model(ts[j])) ** 2, 0)
+  const residualSd = Math.max(Math.sqrt(weightedSq / effectiveSessions), best * 0.02)
 
-  // Anchor the forecast between the model and your latest actual sessions.
+  // Anchor the forecast between the model and your latest actual sessions (up to 3, from the last 8 weeks).
   const lastT = ts.at(-1)!
-  const recentActual = mean(ys.slice(-3))
+  const recentActual = mean(ys.filter((_, j) => lastT - ts[j] <= 8).slice(-3))
   let current = 0.5 * model(lastT) + 0.5 * recentActual
   const daysOff = Math.max(0, daysBetween(points.at(-1)!.date, today))
   const detrainingPct = detrainingFraction(daysOff)
@@ -233,7 +260,6 @@ export function forecastStrength(sessions: ExerciseSession[], opts: ForecastOpti
   const futureRate = rate * (combine(scenarioFactors) / baseMultiplier)
   const bwWeekly = WEEKLY_BW_CHANGE[scenarioInputs.nutrition]
 
-  const trend = logFit(ts, ys)
   const forecast: ForecastPoint[] = []
   const steps = Math.max(1, Math.round(horizonWeeks))
   for (let h = 0; h <= steps; h++) {
@@ -242,13 +268,11 @@ export function forecastStrength(sessions: ExerciseSession[], opts: ForecastOpti
     const c = Math.max(ceiling * Math.pow(bwRatio, 2 / 3), current)
     const expected = c - (c - current) * Math.exp(-futureRate * h)
     const sd = residualSd * Math.sqrt(1 + h / 6)
-    const tFuture = (start.getTime() - t0) / WEEK_MS + h
     forecast.push({
       date: addDays(start, h * 7),
       expected,
       lower: Math.max(0, expected - 1.28 * sd),
       upper: expected + 1.28 * sd,
-      trend: trend.predict(tFuture),
     })
   }
 
@@ -269,6 +293,8 @@ export function forecastStrength(sessions: ExerciseSession[], opts: ForecastOpti
     detrainingPct,
     residualSd,
     sessions: n,
+    halfLifeWeeks,
+    effectiveSessions,
   }
 }
 
