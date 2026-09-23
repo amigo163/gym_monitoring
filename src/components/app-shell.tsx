@@ -8,11 +8,13 @@ import {
   Moon,
   PersonStanding,
   Sun,
+  Trash2,
   Trophy,
   Upload,
   UserRound,
 } from "lucide-react"
 import { type ReactNode, useEffect, useState } from "react"
+import { ImportButton } from "@/components/data-upload"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import {
@@ -33,6 +35,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import type { DateRangeKey } from "@/lib/analysis"
 import { formatDate } from "@/lib/dates"
+import { describeImport } from "@/lib/db"
 import { useStore } from "@/state/store"
 
 export type PageId = "overview" | "exercises" | "muscles" | "patterns" | "records" | "predictions" | "profile"
@@ -130,7 +133,7 @@ const RANGES: { value: DateRangeKey; label: string }[] = [
 ]
 
 export function AppShell({ page, onNavigate, children }: { page: PageId; onNavigate: (p: PageId) => void; children: ReactNode }) {
-  const { data, fileName, range, setRange, clearData } = useStore()
+  const { data, error, lastImport, range, setRange, clearData } = useStore()
   const theme = useTheme()
   const rangeMatters = page !== "predictions" && page !== "profile"
 
@@ -155,14 +158,26 @@ export function AppShell({ page, onNavigate, children }: { page: PageId; onNavig
         <SidebarFooter>
           {data ? (
             <div className="grid gap-2 px-2 pb-1 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
-              <div className="truncate" title={fileName ?? undefined}>
-                {fileName}
-              </div>
+              {lastImport ? (
+                <div className="truncate" title={`${lastImport.fileName} · ${formatDate(new Date(lastImport.importedAt))}`}>
+                  Last import: {describeImport(lastImport.summary)}
+                </div>
+              ) : null}
+              {error ? <div className="text-destructive">{error}</div> : null}
               <div>
                 {formatDate(data.allRows[0].date)} – {formatDate(data.allRows.at(-1)!.date)}
               </div>
-              <Button onClick={clearData} size="sm" variant="outline">
-                <Upload /> Load another file
+              <ImportButton size="sm" variant="outline">
+                <Upload /> Import new export
+              </ImportButton>
+              <Button
+                onClick={() => {
+                  if (window.confirm("Delete every stored workout from this browser? Your profile is kept.")) void clearData()
+                }}
+                size="sm"
+                variant="ghost"
+              >
+                <Trash2 /> Clear workouts
               </Button>
             </div>
           ) : null}

@@ -1,24 +1,45 @@
 import { FileUp, Lock, Sparkles } from "lucide-react"
-import { useRef, useState } from "react"
+import { type ComponentProps, useRef, useState } from "react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import { useStore } from "@/state/store"
 
-export function DataUpload() {
-  const { loadCsv, error } = useStore()
+/** Pick a Strong export and merge it into the stored history. */
+export function ImportButton(props: Omit<ComponentProps<typeof Button>, "onClick">) {
+  const { importCsv } = useStore()
   const input = useRef<HTMLInputElement>(null)
+  return (
+    <>
+      <Button {...props} onClick={() => input.current?.click()} />
+      <input
+        accept=".csv,text/csv"
+        className="hidden"
+        onChange={async (e) => {
+          const file = e.target.files?.[0]
+          e.target.value = ""
+          if (file) await importCsv(await file.text(), file.name)
+        }}
+        ref={input}
+        type="file"
+      />
+    </>
+  )
+}
+
+export function DataUpload() {
+  const { importCsv, error } = useStore()
   const [dragging, setDragging] = useState(false)
   const [loadingSample, setLoadingSample] = useState(false)
 
-  const readFile = async (file: File) => loadCsv(await file.text(), file.name)
+  const readFile = async (file: File) => importCsv(await file.text(), file.name)
 
   const loadSample = async () => {
     setLoadingSample(true)
     try {
       const res = await fetch(`${import.meta.env.BASE_URL}sample-strong.csv`)
-      loadCsv(await res.text(), "sample-strong.csv")
+      await importCsv(await res.text(), "sample-strong.csv")
     } finally {
       setLoadingSample(false)
     }
@@ -30,6 +51,7 @@ export function DataUpload() {
         <h2 className="text-2xl font-semibold tracking-tight">Load your Strong export</h2>
         <p className="text-muted-foreground">
           In the Strong app: Settings → Export Strong Data. Drop the CSV here to see your progress and predictions.
+          Later exports are merged in, so importing the same file twice never duplicates a workout.
         </p>
       </div>
 
@@ -62,28 +84,17 @@ export function DataUpload() {
           <CardDescription>Semicolon or comma separated, kg or lbs</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap justify-center gap-2">
-          <Button onClick={() => input.current?.click()}>
+          <ImportButton>
             <FileUp /> Choose file
-          </Button>
+          </ImportButton>
           <Button disabled={loadingSample} onClick={loadSample} variant="outline">
             <Sparkles /> Try the sample data
           </Button>
-          <input
-            accept=".csv,text/csv"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (file) void readFile(file)
-              e.target.value = ""
-            }}
-            ref={input}
-            type="file"
-          />
         </CardContent>
       </Card>
 
       <p className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-        <Lock className="size-4" /> Everything runs in your browser. Your data never leaves this device.
+        <Lock className="size-4" /> Everything is stored in this browser. Your data never leaves this device.
       </p>
     </div>
   )

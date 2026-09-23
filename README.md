@@ -12,7 +12,7 @@ pnpm dev          # http://localhost:5173
 ```
 
 Export your data from Strong (**Settings → Export Strong Data**), then drop the CSV on the page. Or click **Try the sample data**.
-The file and your profile are kept in `localStorage`, so a reload keeps your data.
+Workouts and your profile are kept in a local IndexedDB database in your browser (see [Local storage](#local-storage)).
 
 | Script | What it does |
 | --- | --- |
@@ -99,17 +99,33 @@ at your forecast strength rate.
 
 These are evidence-informed heuristics for planning, not medical advice.
 
+## Local storage
+
+Everything lives in an IndexedDB database called `gymviz` (`src/lib/db.ts`). Nothing is uploaded.
+
+- **Workouts** (`sets`): one record per set, keyed by workout start time, workout name, exercise, set order and
+  occurrence. Keys come from the data itself, so importing the same export again changes nothing.
+- **Imports**: Strong always exports your full history, so each new export is merged in. Workouts in the export replace
+  their stored copy (edits and deleted sets are picked up). Stored workouts that fall inside the export's date range but
+  are missing from it were deleted or renamed in Strong, so they are dropped. Older workouts outside that range are kept.
+  Each import is logged with how many workouts were new, updated or removed.
+- **Profile** (`profile`, `profileHistory`): the current Body & health inputs, plus one snapshot per day, so you can
+  see how sleep, stress, nutrition and so on changed over time. The bodyweight log keeps its own dated history.
+
+Data from older versions that stored the CSV and profile in `localStorage` is moved into the database on first load.
+
 ## Project layout
 
 ```
 src/
 ├── lib/                  # framework-free logic (unit tested)
 │   ├── strong.ts         # Strong CSV parser (; or , delimited, kg or lbs)
+│   ├── db.ts             # IndexedDB storage and idempotent import merging
 │   ├── analysis.ts       # workouts, sessions, PRs, plateaus, patterns
 │   ├── muscles.ts        # exercise → muscle group mapping
 │   ├── one-rep-max.ts
 │   └── models/           # physiology, strength, volume, load
-├── state/store.tsx       # data + profile context, persisted to localStorage
+├── state/store.tsx       # data + profile context, backed by the local database
 ├── pages/                # one component per page
 └── components/
     ├── charts/           # Bklit chart sources (installed via the shadcn registry)
