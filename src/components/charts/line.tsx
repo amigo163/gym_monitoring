@@ -29,6 +29,7 @@ import {
   resolveLineLoadingPulseMode,
 } from "./line-loading-pulse";
 import { LINE_LOADING_LOOP_PAUSE_MS } from "./line-loading-timing";
+import { SeriesGapStroke } from "./gap-stroke";
 import { LineLoadingSweep } from "./loading-sweep";
 import {
   resolveDashTailBounds,
@@ -74,6 +75,13 @@ export interface LineProps {
   dashFromIndex?: number;
   /** Dash pattern for the tail segment when `dashFromIndex` is set. Default: "6,4" */
   dashArray?: string;
+  /**
+   * `[from, to]` data-index pairs spanning a stretch with no data; drawn
+   * dotted and faded so interpolation isn't mistaken for measurement.
+   */
+  gapSegments?: [number, number][];
+  /** Dash pattern for gap segments. Default: round dots. */
+  gapDashArray?: string;
   /**
    * Show the loading pulse overlay. Default: follows chart loading phase.
    * Set `false` to disable even during loading.
@@ -216,6 +224,8 @@ export function Line({
   markers,
   dashFromIndex,
   dashArray = "6,4",
+  gapSegments,
+  gapDashArray = "0.1,5",
   loading,
   loadingStroke = chartCssVars.foreground,
   loadingStrokeOpacity = 0.5,
@@ -231,7 +241,7 @@ export function Line({
   // `<ChartRevealClip>` or read `revealEpoch` here.
   const {
     data,
-    renderData,
+    renderData: chartRenderData,
     xScale,
     innerHeight,
     innerWidth,
@@ -242,6 +252,16 @@ export function Line({
     yDomainTweenDuration,
   } = useChartStable();
   const yScale = useYScale(yAxisId);
+  // Rows without a value for this series are skipped, so the line runs
+  // across them instead of dropping to the baseline.
+  const renderData = useMemo(() => {
+    const defined = chartRenderData.filter(
+      (d) => typeof d[dataKey] === "number",
+    );
+    return defined.length === chartRenderData.length
+      ? chartRenderData
+      : defined;
+  }, [chartRenderData, dataKey]);
   const useDataTransitionPath = animate && chartPhase === "ready";
   const { pathD: animatedPathD } = useAnimatedSeriesPath({
     chartPhase,
@@ -298,10 +318,11 @@ export function Line({
       const value = d[dataKey];
       return typeof value === "number" ? (yScale(value) ?? 0) : 0;
     },
-    [dataKey, yScale]
+    [dataKey, yScale],
   );
 
   const hasDashTail = resolveDashTailBounds(dashFromIndex, data.length);
+  const hasGaps = (gapSegments?.length ?? 0) > 0;
   const fadeSides = resolveFadeSides(fadeEdges);
   const lineStroke = fadeSides.any ? `url(#${gradientId})` : stroke;
   const fadeStops = fadeSides.any ? fadeGradientStops(fadeSides) : null;
@@ -310,7 +331,7 @@ export function Line({
     chartPhase === "ready" ||
     chartPhase === "exitingReady";
   let visibleStroke = "transparent";
-  if (showSeriesStroke && !hasDashTail) {
+  if (showSeriesStroke && !hasDashTail && !hasGaps) {
     visibleStroke = lineStroke;
   }
 
@@ -351,19 +372,36 @@ export function Line({
           xScale={xScale}
         />
 
-        <SeriesDashTailOverlay
-          dashArray={dashArray}
-          dashFromIndex={dashFromIndex}
-          data={data}
-          innerHeight={innerHeight}
-          innerWidth={innerWidth}
-          pathD={pathD}
-          pathLength={pathLength}
-          stroke={lineStroke}
-          strokeWidth={strokeWidth}
-          xAccessor={xAccessor}
-          xScale={xScale}
-        />
+        {hasGaps ? (
+          <SeriesGapStroke
+            dashArray={dashArray}
+            dashFromIndex={dashFromIndex}
+            data={data}
+            gapDashArray={gapDashArray}
+            gapSegments={gapSegments ?? []}
+            innerHeight={innerHeight}
+            innerWidth={innerWidth}
+            pathD={pathD}
+            stroke={lineStroke}
+            strokeWidth={strokeWidth}
+            xAccessor={xAccessor}
+            xScale={xScale}
+          />
+        ) : (
+          <SeriesDashTailOverlay
+            dashArray={dashArray}
+            dashFromIndex={dashFromIndex}
+            data={data}
+            innerHeight={innerHeight}
+            innerWidth={innerWidth}
+            pathD={pathD}
+            pathLength={pathLength}
+            stroke={lineStroke}
+            strokeWidth={strokeWidth}
+            xAccessor={xAccessor}
+            xScale={xScale}
+          />
+        )}
       </SeriesHoverDim>
 
       {showMarkers ? (

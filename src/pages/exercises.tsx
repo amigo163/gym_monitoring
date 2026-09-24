@@ -27,7 +27,6 @@ import {
   fmtMetric,
   fmtPrimary,
   lowerIsBetter,
-  primaryKind,
   primaryLabel,
   prKindsFor,
   sessionMetric,
@@ -79,7 +78,6 @@ export function ExercisesPage() {
 
   const list = useMemo(() => sessions.get(exercise) ?? [], [sessions, exercise])
   const summary = useMemo(() => summarizeExercise(list), [list])
-  const plateaus = useMemo(() => detectPlateaus(list), [list])
   const improved = useMemo(() => mostImproved(sessions), [sessions])
   const monthly = useMemo(() => monthlySeries(workouts, prs), [workouts, prs])
 
@@ -87,6 +85,7 @@ export function ExercisesPage() {
   const metric = pickedMetric && metrics.includes(pickedMetric) ? pickedMetric : (metrics[0] ?? "e1rm")
   const secondary = metrics.find((m) => m !== metric && m !== PRIMARY_PR[list[0]?.kind ?? "weight"]) ?? null
   const secondaryBest = secondary ? bestOf(list, secondary) : null
+  const plateaus = useMemo(() => detectPlateaus(list, 4, metric), [list, metric])
   const chartData = useMemo(
     () => list.filter((s) => sessionMetric(s, metric) > 0).map((s) => ({ date: s.date, value: sessionMetric(s, metric) })),
     [list, metric],
@@ -150,7 +149,9 @@ export function ExercisesPage() {
             <TimeLineChart
               data={chartData}
               format={fmtAxis(metric)}
+              regions={plateaus.length ? [{ label: "Plateau", color: "var(--status-warning)" }] : []}
               series={[{ key: "value", label: PR_LABEL[metric], color: SERIES[0] }]}
+              showGaps
             >
               {plateaus.map((p) => (
                 <ReferenceArea
@@ -165,7 +166,7 @@ export function ExercisesPage() {
           </ChartCard>
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <ChartCard description="Plateaus are stretches without a new best" title="Plateaus">
+            <ChartCard description={`Stretches without a new best (${PR_LABEL[metric]})`} title="Plateaus">
               {plateaus.length ? (
                 <ul className="grid gap-2 text-sm">
                   {plateaus.map((p) => (
@@ -175,7 +176,7 @@ export function ExercisesPage() {
                       </span>
                       <span className="flex items-center gap-2 text-muted-foreground">
                         <Badge variant="secondary">{p.sessions} sessions</Badge>
-                        stuck at {fmtMetric(primaryKind(summary.last), p.value)}
+                        stuck at {fmtMetric(metric, p.value)}
                       </span>
                     </li>
                   ))}

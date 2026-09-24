@@ -17,7 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ChartCard, EmptyChart, SERIES, type Series, TimeLineChart } from "@/components/viz"
 import { exerciseUsage, weeklyMuscleSets, weeklySeries, buildWorkouts } from "@/lib/analysis"
-import { addDays, daysBetween, formatDate, parseDayKey } from "@/lib/dates"
+import { addDays, daysBetween, formatDate, parseDayKey, startOfDay } from "@/lib/dates"
 import { fmt1, fmtInt, fmtKg, fmtTonnes, fromUnit, toUnit, weightUnit } from "@/lib/format"
 import { type NextAction, type NextSession, type NextStatus, planNextSession } from "@/lib/models/next-session"
 import { type LoadScenario, acuteChronic, acwrZone, dailyLoads, fitnessFatigue, readiness } from "@/lib/models/load"
@@ -79,7 +79,8 @@ function useModelContext(data: Dataset, layoff: boolean) {
     const weekly = weeklyMuscleSets(recentRows, recentFrom, asOf)
     const weeks = Math.max(1, weekly.length)
     const setsPerWeek = (m: MuscleGroup) => weekly.reduce((a, w) => a + (w[m] ?? 0), 0) / weeks
-    return { asOf, trainingYears, setsPerWeek, profile }
+    const trainingDates = [...new Set(data.allRows.map((r) => startOfDay(r.date).getTime()))].map((t) => new Date(t))
+    return { asOf, trainingYears, setsPerWeek, profile, trainingDates }
   }, [data, layoff, profile])
 }
 
@@ -97,6 +98,7 @@ function forecastFor(data: Dataset, ctx: ModelContext, exercise: string, horizon
     weeklySets: landmarks ? ctx.setsPerWeek(muscle) : undefined,
     landmarks,
     today: ctx.asOf,
+    trainingDates: ctx.trainingDates,
   })
 }
 
@@ -556,7 +558,11 @@ function StrengthTab({ data, ctx, picked, onPick, onEditGoal }: TabProps) {
         <>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <StatCard
-              hint={forecast.detrainingPct > 0 ? `−${fmt1(forecast.detrainingPct * 100)}% from the layoff` : "Recent sessions weighted most"}
+              hint={
+                forecast.retained > forecast.current * 1.005
+                  ? `Regaining ${m.format(forecast.retained)} from before the layoff`
+                  : "Smoothed over recent sessions"
+              }
               label={`Current ${m.label.toLowerCase()}`}
               value={m.format(forecast.current)}
             />
@@ -589,9 +595,11 @@ function StrengthTab({ data, ctx, picked, onPick, onEditGoal }: TabProps) {
               <TimeLineChart
                 band={{ lower: "lower", upper: "upper", label: "80% range", color: SERIES[0] }}
                 data={rows}
-                format={metric === "seconds" ? fmtDuration : fmt1}
+                format={metric === "seconds" ? fmtDuration : metric === "e1rm" ? (v) => fmt1(toUnit(v)) : fmt1}
                 height={320}
                 series={series}
+                showGaps
+                unit={metric === "seconds" ? undefined : m.unit}
               >
                 <ReferenceArea fadeEdges={false} fill="var(--muted-foreground)" fillOpacity={0.06} x1={forecast.history.at(-1)!.date} />
               </TimeLineChart>
@@ -1006,6 +1014,15 @@ function HowItWorks({ forecast: f }: { forecast: StrengthForecast }) {
           {f.halfLifeWeeks > HALF_LIFE_WEEKS ? " The window is stretched because you train this exercise rarely." : ""}
         </p>
         <p>
+          <span className="text-foreground">Where you are now</span> is a Kalman-filtered level: each session is a noisy reading of your
+          true strength, so one light day barely moves it while a run of better sessions does.
+        </p>
+        <p>
+          <span className="text-foreground">Layoffs</span> (over three weeks without training anything) cost strength at ≈0.6%/week, but it
+          comes back far faster than it was first built. The forecast regains your pre-layoff level first, then progresses; layoffs and
+          the comeback after them don't count toward the fit of your long-term rate.
+        </p>
+        <p>
           <span className="text-foreground">C (potential)</span> comes from bodyweight-scaled strength standards for squat, bench, deadlift and
           overhead press (strength ∝ mass<sup>⅔</sup>), adjusted for lean mass and age. Other lifts use training age to estimate headroom.
         </p>
@@ -1014,8 +1031,7 @@ function HowItWorks({ forecast: f }: { forecast: StrengthForecast }) {
           factors on the left. Few recent sessions → the prior dominates.
         </p>
         <p>
-          The 80% range widens with the horizon, scaled by how noisy your recent sessions are. Layoffs longer than three weeks apply detraining
-          (≈0.6%/week). Rep-based and timed exercises use the same curve on your most reps or longest hold, with wider headroom.
+          The 80% range widens with the horizon, scaled by how noisy your recent sessions are. Rep-based and timed exercises use the same curve on your most reps or longest hold, with wider headroom.
         </p>
       </div>
     </div>

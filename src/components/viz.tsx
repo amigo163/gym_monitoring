@@ -13,6 +13,7 @@ import { ChartTooltip } from "@/components/charts/tooltip"
 import { XAxis } from "@/components/charts/x-axis"
 import { YAxis } from "@/components/charts/y-axis"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { dataGaps } from "@/lib/analysis"
 import { cn } from "@/lib/utils"
 
 /** Categorical slots, in the validated fixed order. Never cycle past these. */
@@ -67,9 +68,18 @@ export function ChartCard({
   )
 }
 
-export function SeriesLegend({ series, bands = [] }: { series: Series[]; bands?: Pick<Band, "label" | "color">[] }) {
+export function SeriesLegend({
+  series,
+  bands = [],
+  gaps = false,
+}: {
+  series: Series[]
+  bands?: Pick<Band, "label" | "color">[]
+  /** Add a "No data" entry for dotted gap segments. */
+  gaps?: boolean
+}) {
   const items = series.filter((s) => !s.hideInLegend)
-  if (items.length + bands.length < 2) return null
+  if (items.length + bands.length + (gaps ? 1 : 0) < 2) return null
   return (
     <ul className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
       {items.map((s) => (
@@ -90,6 +100,16 @@ export function SeriesLegend({ series, bands = [] }: { series: Series[]; bands?:
           {b.label}
         </li>
       ))}
+      {gaps ? (
+        <li className="flex items-center gap-1.5">
+          <span
+            aria-hidden
+            className="inline-block h-0.5 w-4"
+            style={{ background: "radial-gradient(circle, currentColor 1px, transparent 1.5px) 0 50% / 5px 2px repeat-x" }}
+          />
+          No data
+        </li>
+      ) : null}
     </ul>
   )
 }
@@ -132,6 +152,9 @@ export function TimeLineChart({
   xKey = "date",
   includeY,
   band,
+  showGaps = false,
+  unit,
+  regions = [],
 }: {
   data: Record<string, unknown>[]
   series: Series[]
@@ -139,9 +162,19 @@ export function TimeLineChart({
   height?: number
   children?: ReactNode
   xKey?: string
+  /** Shown above the y-axis and after tooltip values, e.g. "kg". */
+  unit?: string
   /** Values the y-axis must reach, e.g. the top of a reference band. */
   includeY?: number[]
   band?: Band
+  /** Legend entries for shaded regions passed as children, e.g. `<ReferenceArea>`s. */
+  regions?: Pick<Band, "label" | "color">[]
+  /**
+   * Draw long stretches without data (well beyond the series' usual spacing)
+   * dotted. Only for sparse measurements; aggregates that are genuinely 0
+   * should carry the zero instead.
+   */
+  showGaps?: boolean
 }) {
   if (data.length < 2) return <EmptyChart>Not enough data for a trend yet</EmptyChart>
   let yDomainMax: number | undefined
@@ -150,9 +183,24 @@ export function TimeLineChart({
     // Only for non-negative series: a fixed max implies a zero baseline.
     if (!values.some((v) => v < 0)) yDomainMax = Math.max(...values, ...includeY)
   }
+  const gapsByKey = new Map(
+    series.map((s) => {
+      if (!showGaps) return [s.key, [] as [number, number][]]
+      const points = data.flatMap((d, i) => (typeof d[s.key] === "number" ? [i] : []))
+      const dates = points.map((i) => data[i][xKey] as Date)
+      const dashFrom = s.dashFromIndex
+      // Only logged points count: the projected tail is evenly spaced by construction.
+      const until = dashFrom == null ? undefined : points.filter((i) => i <= dashFrom).length - 1
+      // Gap indices are over the defined points; the line only has vertices there, so map back to rows.
+      return [s.key, dataGaps(dates, until).map((g): [number, number] => [points[g], points[g + 1]])]
+    }),
+  )
+  const hasGaps = [...gapsByKey.values()].some((g) => g.length > 0)
+  const withUnit = (v: number) => (unit ? `${format(v)} ${unit}` : format(v))
   return (
     <div>
-      <SeriesLegend bands={band ? [band] : []} series={series} />
+      <SeriesLegend bands={[...(band ? [band] : []), ...regions]} gaps={hasGaps} series={series} />
+      {unit ? <div className="-mb-2 text-xs text-muted-foreground">{unit}</div> : null}
       <LineChart aspectRatio="" data={data} margin={{ left: 44 }} style={{ height }} xDataKey={xKey} yDomainMax={yDomainMax}>
         <Grid horizontal />
         {children}
@@ -169,6 +217,7 @@ export function TimeLineChart({
             dashFromIndex={s.dashFromIndex}
             dataKey={s.key}
             fadeEdges={false}
+            gapSegments={gapsByKey.get(s.key)}
             key={s.key}
             showHighlight={false}
             stroke={s.color}
@@ -182,10 +231,10 @@ export function TimeLineChart({
             ...series.map((s) => ({
               color: s.color,
               label: s.label,
-              value: s.hideInTooltip || typeof p[s.key] !== "number" ? "–" : format(p[s.key] as number),
+              value: s.hideInTooltip || typeof p[s.key] !== "number" ? "–" : withUnit(p[s.key] as number),
             })),
             ...(band && typeof p[band.lower] === "number" && typeof p[band.upper] === "number" && p[band.upper] !== p[band.lower]
-              ? [{ color: band.color, label: band.label, value: `${format(p[band.lower] as number)}–${format(p[band.upper] as number)}` }]
+              ? [{ color: band.color, label: band.label, value: `${format(p[band.lower] as number)}–${withUnit(p[band.upper] as number)}` }]
               : []),
           ]}
         />

@@ -111,13 +111,15 @@ function resolveTimeSeriesYDomain(
 
   const { minValue, maxValue } = collectNumericExtents(data, dataKeys);
 
-  if (minValue >= 0) {
-    const top = maxValue <= 0 ? 100 : maxValue * 1.1;
-    return [0, top];
+  if (minValue >= 0 && maxValue <= 0) {
+    return [0, 100];
   }
 
-  const padding = (maxValue - minValue) * 0.05 || 1;
-  return [minValue - padding, maxValue + padding];
+  // Fit the data rather than anchoring at zero, so progress on a 100 kg lift
+  // isn't squashed into the top sliver. Positive series never dip below 0.
+  const padding = (maxValue - minValue) * 0.1 || Math.abs(maxValue) * 0.1 || 1;
+  const bottom = minValue - padding;
+  return [minValue >= 0 ? Math.max(0, bottom) : bottom, maxValue + padding];
 }
 
 function ensureChildKey(child: ReactElement, index: number): ReactElement {

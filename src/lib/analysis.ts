@@ -15,6 +15,7 @@ import type {
   ExerciseSession,
   MuscleGroup,
   PersonalRecord,
+  PrKind,
   SetRow,
   TrackingKind,
   Workout,
@@ -315,26 +316,31 @@ export interface Plateau {
   value: number
 }
 
+const tolerance = 1.005 // ignore rounding-level "gains"
+
 /**
- * Stretches of ≥ `window` sessions where the main metric (e1RM, most reps, longest hold…)
- * never exceeded the value at the start of the stretch.
+ * Stretches of ≥ `window` sessions where `metric` (default: the main one — e1RM, most reps,
+ * longest hold…) never beat the value at the start of the stretch. Sessions without that
+ * metric are skipped. A layoff (see {@link dataGaps}) ends the stretch: time off isn't being stuck.
  */
-export function detectPlateaus(list: ExerciseSession[], window = 4): Plateau[] {
-  const value = (s: ExerciseSession) => s.primary
+export function detectPlateaus(sessions: ExerciseSession[], window = 4, metric?: PrKind): Plateau[] {
+  const value = (s: ExerciseSession) => (metric ? sessionMetric(s, metric) : s.primary)
+  const list = metric ? sessions.filter((s) => value(s) > 0) : sessions
+  const beats = (v: number, ref: number) => (metric && lowerIsBetter(metric) ? v * tolerance < ref : v > ref * tolerance)
   const plateaus: Plateau[] = []
   if (list.length < window) return plateaus
   let startIdx = 0
   let ref = value(list[0])
-  const tolerance = 1.005 // ignore rounding-level "gains"
   const close = (endIdx: number) => {
     const n = endIdx - startIdx + 1
     if (n >= window) {
       plateaus.push({ start: list[startIdx].date, end: list[endIdx].date, sessions: n, value: ref })
     }
   }
+  const layoffs = new Set(dataGaps(list.map((s) => s.date)))
   for (let i = 1; i < list.length; i++) {
     const v = value(list[i])
-    if (v > ref * tolerance) {
+    if (layoffs.has(i - 1) || beats(v, ref)) {
       close(i - 1)
       startIdx = i
       ref = v
@@ -464,4 +470,19 @@ export function filterByRange(rows: SetRow[], range: DateRangeKey): SetRow[] {
   const end = rows.at(-1)!.date
   const cutoff = startOfDay(new Date(end.getFullYear(), end.getMonth() - months, end.getDate()))
   return rows.filter((r) => r.date >= cutoff)
+}
+
+/**
+ * Indices `i` where the stretch from `dates[i]` to `dates[i + 1]` is a real
+ * break in the record rather than the usual spacing: longer than 3× the
+ * median interval and at least two weeks. Only stretches before `until` count
+ * (e.g. the last logged point before a forecast).
+ */
+export function dataGaps(dates: Date[], until = dates.length - 1): number[] {
+  const intervals = dates.slice(1, until + 1).map((d, i) => d.getTime() - dates[i].getTime())
+  if (intervals.length < 3) return []
+  const sorted = [...intervals].sort((a, b) => a - b)
+  const median = sorted[Math.floor(sorted.length / 2)]
+  const threshold = Math.max(3 * median, 14 * DAY_MS)
+  return intervals.flatMap((ms, i) => (ms > threshold ? [i] : []))
 }

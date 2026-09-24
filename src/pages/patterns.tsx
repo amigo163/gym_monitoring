@@ -59,7 +59,7 @@ export function PatternsPage() {
           <TimeLineChart data={weekly as unknown as Record<string, unknown>[]} format={fmtInt} series={[{ key: "workouts", label: "Workouts", color: SERIES[0] }]} />
         </ChartCard>
         <ChartCard description="Minutes per workout" title="Workout duration">
-          <TimeLineChart data={durations} format={fmtInt} series={[{ key: "minutes", label: "Minutes", color: SERIES[0] }]} />
+          <TimeLineChart data={durations} format={fmtInt} series={[{ key: "minutes", label: "Minutes", color: SERIES[0] }]} showGaps />
         </ChartCard>
         <ChartCard description="Workouts started on each weekday" title="Day of week">
           <CategoryBarChart
@@ -76,7 +76,7 @@ export function PatternsPage() {
           <CategoryBarChart data={rest} format={fmtInt} series={[{ key: "count", label: "Times", color: SERIES[0] }]} xKey="label" />
         </ChartCard>
         <ChartCard description={`${weightUnit()} lifted per minute of workout`} title="Training density">
-          <TimeLineChart data={durations} format={(v) => fmtInt(toUnit(v))} series={[{ key: "density", label: `${weightUnit()}/min`, color: SERIES[0] }]} />
+          <TimeLineChart data={durations} format={(v) => fmtInt(toUnit(v))} series={[{ key: "density", label: `${weightUnit()}/min`, color: SERIES[0] }]} showGaps />
         </ChartCard>
       </div>
 

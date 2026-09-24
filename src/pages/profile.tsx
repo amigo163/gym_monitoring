@@ -299,6 +299,7 @@ export function ProfilePage() {
               format={(v) => fmt1(toUnit(v))}
               height={240}
               series={[{ key: "kg", label: "Bodyweight", color: SERIES[0] }]}
+              showGaps
             />
           </div>
         </div>

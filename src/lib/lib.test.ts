@@ -3,13 +3,14 @@ import { describe, expect, it } from "vitest"
 import {
   buildExerciseSessions,
   buildWorkouts,
+  dataGaps,
   detectPlateaus,
   findPersonalRecords,
   overviewStats,
 } from "./analysis"
 import { acuteChronic, dailyLoads, fitnessFatigue, readiness } from "./models/load"
 import { DEFAULT_PROFILE, bodyweightAt, classify, dots, mainLiftOf } from "./models/physiology"
-import { detrainingFraction, forecastStrength, recencyWeights, weeksToTarget } from "./models/strength"
+import { detrainingFraction, forecastStrength, layoffsBefore, recencyWeights, strengthLevels, weeksToTarget } from "./models/strength"
 import { personalLandmarks, planVolume } from "./models/volume"
 import { planNextSession } from "./models/next-session"
 import { muscleGroupFor, setMuscleOverrides } from "./muscles"
@@ -104,6 +105,32 @@ describe("analysis", () => {
     )
     expect(detectPlateaus(flat, 4)).toEqual([expect.objectContaining({ sessions: 4, value: 100 })])
   })
+
+  it("detects plateaus on the charted metric, skipping sessions without it", () => {
+    // e1RM keeps climbing while top weight stalls; one session logged no weight at all.
+    const rows = [100, 100, 0, 100, 100, 100].map(
+      (w, i) => ({ bestE1rm: 100 + i * 5, topWeight: w, primary: 100 + i * 5, date: new Date(2024, 0, i + 1) }) as ExerciseSession,
+    )
+    expect(detectPlateaus(rows, 4)).toEqual([])
+    expect(detectPlateaus(rows, 4, "weight")).toEqual([expect.objectContaining({ sessions: 5, value: 100 })])
+  })
+
+  it("treats a lower value as the better one for pace", () => {
+    const rows = [300, 301, 300, 302, 290].map((p, i) => ({ paceSecPerKm: p, date: new Date(2024, 0, i + 1) }) as unknown as ExerciseSession)
+    expect(detectPlateaus(rows, 4, "pace")).toEqual([expect.objectContaining({ sessions: 4, value: 300 })])
+  })
+
+  it("ends a plateau at a layoff", () => {
+    // Twice a week, a five-week break, then back at the same level.
+    const days = [0, 3, 7, 10, 45, 48, 52, 55]
+    const flat = days.map(
+      (d) => ({ bestE1rm: 100, topWeight: 100, primary: 100, date: new Date(2024, 0, 1 + d) }) as ExerciseSession,
+    )
+    expect(detectPlateaus(flat, 4)).toEqual([
+      expect.objectContaining({ start: flat[0].date, end: flat[3].date, sessions: 4 }),
+      expect.objectContaining({ start: flat[4].date, end: flat[7].date, sessions: 4 }),
+    ])
+  })
 })
 
 describe("physiology", () => {
@@ -186,6 +213,36 @@ describe("strength forecast", () => {
     const f = forecastStrength(series, { profile: DEFAULT_PROFILE, horizonWeeks: 4, today: at(107) })!
     expect(f.current).toBeLessThan(85)
     expect(f.effectiveSessions).toBeLessThan(series.length)
+  })
+
+  it("doesn't let one light day drag your level down", () => {
+    const ts = [0, 1, 2, 3, 4, 5]
+    const levels = strengthLevels(ts, [100, 101, 100, 102, 101, 85], 4)
+    expect(levels.at(-1)!).toBeGreaterThan(96)
+  })
+
+  it("treats a gap as a layoff only when you trained nothing", () => {
+    const at = (week: number) => new Date(2024, 0, 1 + week * 7)
+    const dates = [at(0), at(6)]
+    expect(layoffsBefore(dates, [0, 1, 2, 3, 4, 5, 6].map(at))).toEqual([false, false])
+    expect(layoffsBefore(dates, [at(0), at(1), at(6)])).toEqual([false, true])
+  })
+
+  it("forecasts a fast comeback to the pre-layoff level", () => {
+    const at = (week: number) => new Date(2024, 0, 1 + week * 7)
+    const before = Array.from({ length: 20 }, (_, w) => ({ date: at(w), value: 90 + w * 0.5 }))
+    const after = [32, 33].map((w, i) => ({ date: at(w), value: 88 + i * 2 }))
+    const series = [...before, ...after].map(({ date, value }) => ({ ...bench[0], date, bestE1rm: value, workoutId: String(date.getTime()) }))
+    const f = forecastStrength(series, {
+      profile: DEFAULT_PROFILE,
+      horizonWeeks: 12,
+      today: at(33),
+      trainingDates: series.map((s) => s.date),
+    })!
+    expect(f.retained).toBeGreaterThan(97)
+    expect(f.current).toBeLessThan(f.retained)
+    expect(f.forecast[6].expected).toBeGreaterThan(96)
+    expect(weeksToTarget(f, 96)).toBeLessThan(8)
   })
 
   it("solves time to a target", () => {
@@ -514,5 +571,26 @@ describe("next session for reps and holds", () => {
   it("skips stretching and cardio", () => {
     expect(planFor("Stretching", setsOf("Stretching", [[1, [{ seconds: 600 }]]]), new Date(2024, 0, 3))).toBeNull()
     expect(planFor("Cycling (Indoor)", setsOf("Cycling (Indoor)", [[1, [{ seconds: 1200 }]]]), new Date(2024, 0, 3))).toBeNull()
+  })
+})
+
+describe("dataGaps", () => {
+  const days = (...offsets: number[]) => offsets.map((d) => new Date(2025, 0, 1 + d))
+
+  it("flags only stretches far beyond the usual spacing", () => {
+    // Twice a week, then a five-week layoff.
+    expect(dataGaps(days(0, 3, 7, 10, 14, 49, 52, 56))).toEqual([4])
+  })
+
+  it("ignores normal spacing, even for sparse weigh-ins", () => {
+    expect(dataGaps(days(0, 30, 61, 90, 120))).toEqual([])
+  })
+
+  it("never flags less than two weeks", () => {
+    expect(dataGaps(days(0, 1, 2, 3, 4, 12))).toEqual([])
+  })
+
+  it("stops at the last logged point", () => {
+    expect(dataGaps(days(0, 3, 7, 10, 14, 49, 52), 4)).toEqual([])
   })
 })
